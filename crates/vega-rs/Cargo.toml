@@ -1,0 +1,17 @@
+[package]
+name = "vega-rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+alloy.workspace = true
+bincode.workspace = true
+chrono.workspace = true
+clap = { version = "4.5.20", features = ["derive"] }
+eyre = "0.6.12"
+futures = "0.3.31"
+overlord-shared-types.workspace = true
+serde_json = "1.0.133"
+tokio.workspace = true
+uuid = { version = "1.11.0", features = ["v4"]}
+zmq.workspace = true

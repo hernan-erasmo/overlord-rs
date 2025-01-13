@@ -1,0 +1,151 @@
+use alloy::{
+    primitives::{Address, U256},
+    providers::{IpcConnect, ProviderBuilder},
+};
+
+use std::fs::File;
+use std::io::Write;
+
+use bincode::deserialize;
+use chrono::Local;
+use clap::Parser;
+use tokio::time::Instant;
+
+use overlord_shared_types::{
+    MessageBundle,
+    PriceUpdateBundle,
+};
+use vega_rs::user_reserve_cache::UserReservesCache;
+use vega_rs::calc_utils::get_hf_for_users;
+use vega_rs::fork_provider::ForkProvider;
+
+#[derive(Parser)]
+#[clap(
+    name = "vega-rs",
+    version = "1.0",
+    author = "hernan",
+    about = "Vega listen's for transactions and does math"
+)]
+struct VegaArgs {
+    #[clap(long, default_value = "64")]
+    buckets: usize,
+
+    #[clap(long, default_value = "addresses.txt")]
+    addresses_file: String,
+
+    #[clap(long, default_value = "asset_to_contract_address_mapping.csv")]
+    chainlink_addresses_file: String,
+}
+
+async fn run_price_update_pipeline(
+    cache: &mut UserReservesCache,
+    bundle: Option<&PriceUpdateBundle>,
+) {
+    let pipeline_processing = Instant::now();
+    let address_buckets = cache.get_candidates_for_bundle(bundle).await;
+    if address_buckets.len() == 1 && address_buckets[0].is_empty() {
+        return;
+    }
+    let fork_provider = match ForkProvider::new(bundle).await {
+        Ok(provider) => provider,
+        Err(e) => {
+            eprintln!("Failed to spin up fork: {:?}", e);
+            return;
+        }
+    };
+    let trace_id = bundle.map_or("initial-run".to_string(), |b| b.trace_id.clone());
+    let trace_id_clone = trace_id.clone();
+    let alert_callback = move |address: Address, hf: U256, collateral: U256| {
+        println!(
+            "ALERT | {} | {} has HF < 1: {} (total collateral {})",
+            trace_id_clone, address, hf, collateral
+        );
+    };
+    let results = get_hf_for_users(
+        address_buckets,
+        fork_provider.fork_provider.as_ref().unwrap(),
+        Some(alert_callback),
+    )
+    .await;
+    let pipeline_processing_elapsed = pipeline_processing.elapsed().as_millis();
+    let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    println!(
+        "{} | pipeline:{} results | {} ms | {} candidates processed | {} with HF < 1",
+        now,
+        trace_id.clone(),
+        pipeline_processing_elapsed,
+        results.raw_results.len(),
+        results.under_1_hf.len()
+    );
+    let hf_traces_filepath = format!("hf-traces/{}.txt", trace_id);
+    let mut hf_traces_file = File::create(hf_traces_filepath).expect("Failed to create HF traces file");
+    for (address, hf) in results.raw_results.iter() {
+        writeln!(hf_traces_file, "{:?} {}", address, hf).expect("Failed to write to HF traces file");
+    }
+}
+
+async fn _dump_initial_hf_results(user_buckets: Vec<Vec<Address>>) -> Result<(), String> {
+    let init_hf_results_timer = Instant::now();
+    let ipc_url = "/tmp/reth.ipc";
+    let ipc = IpcConnect::new(ipc_url.to_string());
+    let provider = match ProviderBuilder::new().on_ipc(ipc).await {
+        Ok(provider) => provider,
+        Err(e) => {
+            eprintln!("Failed to connect to IPC: {:?}", e);
+            return Err("Failed to connect to IPC".to_string());
+        }
+    };
+    let init_hf_results = get_hf_for_users(
+        user_buckets,
+        &provider,
+        None::<fn(Address, U256, U256)>
+    ).await;
+    let init_hf_results_filepath = format!("init_hf_under_1_results_{}.txt", Local::now().format("%Y%m%d"));
+    let mut init_hf_results_file = File::create(init_hf_results_filepath.clone()).expect("Failed to create init HF results file");
+    for (address, hf) in init_hf_results.under_1_hf.iter() {
+        writeln!(init_hf_results_file, "{:?}: {}", address, hf).expect("Failed to write to init HF results file");
+    }
+    let init_hf_results_elapsed = init_hf_results_timer.elapsed().as_millis();
+    eprintln!("Initial HF results dumped into {} in {} ms", init_hf_results_filepath, init_hf_results_elapsed);
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<(), String> {
+    let parse = VegaArgs::parse();
+    let args = parse;
+
+    eprintln!("Running with {} buckets", args.buckets);
+    let mut user_reserves_cache = UserReservesCache::new();
+    let user_buckets = user_reserves_cache.initialize_cache(&args.addresses_file, &args.chainlink_addresses_file).await.expect("Problem initializing cache");
+
+    if let Err(e) = _dump_initial_hf_results(user_buckets).await {
+        eprintln!("Failed to dump initial HF results: {:?}", e);
+        return Err(e);
+    }
+
+    // Create IPC file and start listening for price updates
+    let context = zmq::Context::new();
+    let inbound_socket = context.socket(zmq::PULL).unwrap();
+    inbound_socket
+        .bind("ipc:///tmp/vega_inbound")
+        .expect("Failed to bind inbound socket");
+    eprintln!("VEGA is running and listening for price updates...");
+
+    loop {
+        let msg = inbound_socket
+            .recv_bytes(0)
+            .expect("Failed to receive inbound update...");
+        let deserialized_message: MessageBundle =
+            deserialize(&msg).expect("Failed to deserialize inbound update");
+        match deserialized_message {
+            MessageBundle::PriceUpdate(price_update) => {
+                run_price_update_pipeline(&mut user_reserves_cache, Some(&price_update)).await;
+            }
+            MessageBundle::WhistleblowerNotification(whistleblower_update) => {
+                eprintln!("Received whistleblower update: {:?}", whistleblower_update);
+                user_reserves_cache.update_cache(&whistleblower_update).await;
+            }
+        };
+    }
+}

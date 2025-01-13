@@ -1,0 +1,15 @@
+[package]
+name = "oops-rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+alloy.workspace = true
+bincode.workspace = true
+chrono.workspace = true
+ethers-core = "2.0.14"
+futures-util = "0.3.31"
+hex = "0.4.3"
+overlord-shared-types.workspace = true
+tokio.workspace = true
+zmq.workspace = true
