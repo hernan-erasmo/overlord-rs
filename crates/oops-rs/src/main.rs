@@ -37,6 +37,8 @@ sol!(
 );
 
 const SECONDS_BEFORE_RECONNECTION: u64 = 2;
+const PATH_TO_ADDRESSES_INPUT: &str = "crates/oops-rs/addresses.txt";
+const VEGA_INBOUND_ENDPOINT: &str = "ipc:///tmp/vega_inbound";
 
 fn get_price_from_input(tx_input: &Bytes) -> Result<(U256, Address), Box<dyn Error>> {
     // get `data` from forward(address to, bytes calldata data)
@@ -151,7 +153,7 @@ fn _init_addresses(file_path: String) -> Result<Vec<Address>, Box<dyn Error>> {
 #[tokio::main]
 async fn main() {
     let allowed_addresses =
-        _init_addresses(String::from("crates/oops-rs/addresses.txt")).expect("Failed to initialize addresses");
+        _init_addresses(String::from(PATH_TO_ADDRESSES_INPUT)).expect("Failed to initialize addresses");
 
     loop {
         // Outer loop to restart IPC on major connection issues
@@ -204,8 +206,7 @@ async fn main() {
             let provider_clone = provider.clone();
             let vega_context = zmq::Context::new();
             let vega_socket = vega_context.socket(zmq::PUSH).unwrap();
-            let endpoint = "ipc:///tmp/vega_inbound";
-            match vega_socket.connect(endpoint) {
+            match vega_socket.connect(VEGA_INBOUND_ENDPOINT) {
                 Ok(_) => eprintln!("Connected to vega"),
                 Err(e) => {
                     eprintln!("Failed to connect to Vega: {e}");
@@ -250,7 +251,7 @@ async fn main() {
                         tx_hash
                     );
                 }
-                vega_socket.disconnect(endpoint).unwrap();
+                vega_socket.disconnect(VEGA_INBOUND_ENDPOINT).unwrap();
             }
         });
 

@@ -19,6 +19,8 @@ use vega_rs::user_reserve_cache::UserReservesCache;
 use vega_rs::calc_utils::get_hf_for_users;
 use vega_rs::fork_provider::ForkProvider;
 
+const VEGA_INBOUND_ENDPOINT: &str = "ipc:///tmp/vega_inbound";
+
 #[derive(Parser)]
 #[clap(
     name = "vega-rs",
@@ -128,7 +130,7 @@ async fn main() -> Result<(), String> {
     let context = zmq::Context::new();
     let inbound_socket = context.socket(zmq::PULL).unwrap();
     inbound_socket
-        .bind("ipc:///tmp/vega_inbound")
+        .bind(VEGA_INBOUND_ENDPOINT)
         .expect("Failed to bind inbound socket");
     eprintln!("VEGA is running and listening for price updates...");
 
