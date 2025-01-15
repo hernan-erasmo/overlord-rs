@@ -266,14 +266,12 @@ async fn main() {
                     vega_socket
                         .send(&serialized_bundle, 0)
                         .expect("failed to send bundle");
-                    eprintln!("Price update sent to Vega");
-                    let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+                    let expected_block = provider_clone.get_block_number().await.unwrap() + 1;
                     info!(
-                        "[{}] - {} - {} - https://etherscan.io/tx/{:?}",
-                        now,
-                        bundle.trace_id,
-                        (provider_clone.get_block_number().await.unwrap() + 1),
-                        tx_hash
+                        message = "Price update sent to Vega",
+                        trace_id = %bundle.trace_id,
+                        expected_block = %expected_block,
+                        tx_hash = %format!("{:?}", tx_hash),
                     );
                 }
                 vega_socket.disconnect(VEGA_INBOUND_ENDPOINT).unwrap();
