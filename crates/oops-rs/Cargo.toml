@@ -10,7 +10,7 @@ chrono.workspace = true
 ethers-core.workspace = true
 futures-util.workspace = true
 tracing = "0.1"
-tracing-subscriber = "0.3"
+tracing-subscriber = {version = "0.3", features = ["local-time"]}
 tracing-appender = "0.2"
 hex.workspace = true
 overlord-shared-types.workspace = true
