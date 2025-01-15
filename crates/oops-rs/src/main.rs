@@ -9,14 +9,24 @@ use alloy::{
 use chrono::Local;
 use ethers_core::abi::{decode, ParamType};
 use overlord_shared_types::{MessageBundle, PriceUpdateBundle};
-use std::error::Error;
-use std::fs::File;
-use std::io::{self, BufRead};
-use std::path::Path;
-use std::str::FromStr;
+use std::{
+    error::Error,
+    fs::File,
+    io::{
+        self,
+        BufRead,
+    },
+    path::Path,
+    str::FromStr,
+};
 use tokio::{
     sync::broadcast,
     time::{sleep, Duration},
+};
+use tracing::{debug, info};
+use tracing_appender::rolling::{
+    self,
+    Rotation
 };
 
 sol!(
@@ -146,12 +156,22 @@ fn _init_addresses(file_path: String) -> Result<Vec<Address>, Box<dyn Error>> {
         .map(|addr| format!("{:?}", addr))
         .collect::<Vec<String>>()
         .join(", ");
-    eprintln!("Allowed addresses: {}", addresses_str);
+    debug!("Allowed addresses: {}", addresses_str);
     Ok(allowed_addresses)
+}
+
+fn _setup_logging() {
+    let log_file = rolling::RollingFileAppender::new(Rotation::DAILY, "/var/log/overlord-rs", "oops-rs.log");
+    let file_writer = tracing_subscriber::fmt::writer::BoxMakeWriter::new(log_file);
+    tracing_subscriber::fmt()
+        .with_writer(file_writer)
+        .init();
 }
 
 #[tokio::main]
 async fn main() {
+    _setup_logging();
+
     let allowed_addresses =
         _init_addresses(String::from(PATH_TO_ADDRESSES_INPUT)).expect("Failed to initialize addresses");
 
@@ -243,7 +263,7 @@ async fn main() {
                         .expect("failed to send bundle");
                     eprintln!("Price update sent to Vega");
                     let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-                    println!(
+                    info!(
                         "[{}] - {} - {} - https://etherscan.io/tx/{:?}",
                         now,
                         bundle.trace_id,
