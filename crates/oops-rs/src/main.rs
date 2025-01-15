@@ -26,7 +26,11 @@ use tokio::{
 use tracing::{debug, info};
 use tracing_appender::rolling::{
     self,
-    Rotation
+    Rotation,
+};
+use tracing_subscriber::fmt::{
+    time::LocalTime,
+    writer::BoxMakeWriter,
 };
 
 sol!(
@@ -162,9 +166,10 @@ fn _init_addresses(file_path: String) -> Result<Vec<Address>, Box<dyn Error>> {
 
 fn _setup_logging() {
     let log_file = rolling::RollingFileAppender::new(Rotation::DAILY, "/var/log/overlord-rs", "oops-rs.log");
-    let file_writer = tracing_subscriber::fmt::writer::BoxMakeWriter::new(log_file);
+    let file_writer = BoxMakeWriter::new(log_file);
     tracing_subscriber::fmt()
         .with_writer(file_writer)
+        .with_timer(LocalTime::rfc_3339())
         .init();
 }
 
