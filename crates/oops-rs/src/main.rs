@@ -6,7 +6,6 @@ use alloy::{
     sol,
     sol_types::SolCall,
 };
-use chrono::Local;
 use ethers_core::abi::{decode, ParamType};
 use overlord_shared_types::{MessageBundle, PriceUpdateBundle};
 use std::{
@@ -23,7 +22,7 @@ use tokio::{
     sync::broadcast,
     time::{sleep, Duration},
 };
-use tracing::{debug, info};
+use tracing::info;
 use tracing_appender::rolling::{
     self,
     Rotation,
@@ -164,7 +163,7 @@ fn _init_addresses(file_path: String) -> Result<Vec<Address>, Box<dyn Error>> {
         .map(|addr| format!("{:?}", addr))
         .collect::<Vec<String>>()
         .join(", ");
-    debug!("Allowed addresses: {}", addresses_str);
+    info!("Allowed addresses: {}", addresses_str);
     Ok(allowed_addresses)
 }
 
@@ -174,6 +173,7 @@ fn _setup_logging() {
     tracing_subscriber::fmt()
         .with_writer(file_writer)
         .with_timer(LocalTime::rfc_3339())
+        .with_target(true)
         .init();
 }
 
