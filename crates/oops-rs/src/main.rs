@@ -19,7 +19,7 @@ use tokio::{
     sync::broadcast,
     time::{sleep, Duration},
 };
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_appender::rolling::{self, Rotation};
 use tracing_subscriber::fmt::{time::LocalTime, writer::BoxMakeWriter};
 
@@ -63,7 +63,7 @@ fn get_price_from_input(tx_input: &Bytes) -> Result<(U256, Address), Box<dyn Err
     };
 
     // this is what the function _decodeReport(bytes memory rawReport) of OCR2Aggregator.sol does
-    let decoded_transmit_report = decode(
+    let decoded_transmit_report = match decode(
         &[
             ParamType::Uint(32),                             // observationsTimestamp
             ParamType::FixedBytes(32),                       // rawObservers
@@ -71,8 +71,13 @@ fn get_price_from_input(tx_input: &Bytes) -> Result<(U256, Address), Box<dyn Err
             ParamType::Int(192),                             // juelsPerFeeCoin
         ],
         &transmit_report,
-    )
-    .unwrap();
+    ) {
+        Ok(decoded) => decoded,
+        Err(e) => {
+            error!("Failed to decode transmit report: {}", e);
+            return Err(Box::new(e));
+        }
+    };
 
     let observations = decoded_transmit_report[2].clone().into_array().unwrap();
     let median = &observations[observations.len() / 2];
@@ -91,7 +96,13 @@ fn read_addresses_from_file(filename: &str) -> io::Result<Vec<alloy::primitives:
     let mut addresses = Vec::new();
     for line in reader.lines() {
         let line = line?;
-        addresses.push(Address::from_str(str::trim(&line)).expect("Failed to parse address"));
+        match Address::from_str(line.trim()) {
+            Ok(address) => addresses.push(address),
+            Err(e) => {
+                error!("Failed to parse address from line '{}': {}", line, e);
+                continue;
+            }
+        };
     }
     Ok(addresses)
 }
@@ -138,22 +149,26 @@ fn is_transmit_call(tx_body: &Transaction) -> bool {
     // so we begin looking at position 100 because the transmit() selector
     // would be at slot 3 (check Input Data default view in etherscan)
     // so then 3 * 32 = 96 + 4 = 100
-    if tx_input.len() < 132 {
-        eprintln!(
+    let selector_chunk = tx_input.get(100..132).unwrap_or_else(|| {
+        warn!(
             "INVALID TRANSMIT: looked valid, but tx_input length ({}) is too short. tx_hash was {}",
             tx_input.len(),
             tx_body.hash
         );
-        return false;
-    }
-    let selector_chunk = &tx_input[100..132];
+        &[]
+    });
     selector_chunk.starts_with(&transmit_selector)
 }
 
 /// Get the list of addresses thah we will listen to for new price updates
 fn _init_addresses(file_path: String) -> Result<Vec<Address>, Box<dyn Error>> {
-    let allowed_addresses =
-        read_addresses_from_file(&file_path).expect("Failed to read addresses from file");
+    let allowed_addresses = match read_addresses_from_file(&file_path) {
+        Ok(addresses) => addresses,
+        Err(e) => {
+            error!("Failed to read addresses from file: {}", e);
+            return Err(Box::new(e));
+        }
+    };
     let addresses_str = allowed_addresses
         .iter()
         .map(|addr| format!("{:?}", addr))
@@ -178,8 +193,13 @@ fn _setup_logging() {
 async fn main() {
     _setup_logging();
 
-    let allowed_addresses = _init_addresses(String::from(PATH_TO_ADDRESSES_INPUT))
-        .expect("Failed to initialize addresses");
+    let allowed_addresses = match _init_addresses(String::from(PATH_TO_ADDRESSES_INPUT)) {
+        Ok(addresses) => addresses,
+        Err(e) => {
+            error!("Failed to initialize addresses: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     loop {
         // Outer loop to restart IPC on major connection issues
