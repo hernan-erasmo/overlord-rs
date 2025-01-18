@@ -211,7 +211,7 @@ async fn main() {
                 client
             }
             Err(e) => {
-                eprintln!(
+                error!(
                     "Failed to connect to IPC: {e}. Retrying in {} seconds...",
                     SECONDS_BEFORE_RECONNECTION
                 );
@@ -223,24 +223,26 @@ async fn main() {
         let mut pending_tx_stream = match provider.subscribe_full_pending_transactions().await {
             Ok(stream) => stream,
             Err(e) => {
-                eprintln!("Failed to subscribe to pending transactions: {e}. Retrying...");
+                error!(
+                    "Failed to subscribe to pending transactions: {e}. Retrying in {} seconds...",
+                    SECONDS_BEFORE_RECONNECTION
+                );
+                sleep(Duration::from_secs(SECONDS_BEFORE_RECONNECTION)).await;
                 continue;
             }
         };
-
         let (tx_buffer, mut rx_buffer) = broadcast::channel::<Transaction>(1024);
-
         let receiver_handle = tokio::spawn(async move {
             loop {
                 match pending_tx_stream.recv().await {
                     Ok(tx_body) => {
                         if let Err(e) = tx_buffer.send(tx_body) {
-                            eprintln!("Failed to send tx to buffer: {e}");
+                            error!("Failed to send tx to buffer: {e}");
                             break;
                         }
                     }
                     Err(e) => {
-                        eprintln!("Unknow stream enqueue error: {e}");
+                        error!("Unknow stream enqueue error: {e}");
                         break;
                     }
                 }
@@ -253,9 +255,9 @@ async fn main() {
             let vega_context = zmq::Context::new();
             let vega_socket = vega_context.socket(zmq::PUSH).unwrap();
             match vega_socket.connect(VEGA_INBOUND_ENDPOINT) {
-                Ok(_) => eprintln!("Connected to vega"),
+                Ok(_) => info!("Connected to vega inbound endpoint"),
                 Err(e) => {
-                    eprintln!("Failed to connect to Vega: {e}");
+                    error!("Failed to connect to Vega: {e}");
                     continue;
                 }
             }
@@ -269,7 +271,7 @@ async fn main() {
                     let (tx_new_price, forward_to) = match get_price_from_input(&tx_body.input) {
                         Ok((price, to)) => (price, to),
                         Err(e) => {
-                            eprintln!("INVALID PRICE UPDATE: failed to get price from input: {e}");
+                            error!("INVALID PRICE UPDATE: failed to get price from input: {e}");
                             continue;
                         }
                     };
@@ -282,12 +284,27 @@ async fn main() {
                         tx_input: tx_body.input,
                     };
                     let message_bundle = MessageBundle::PriceUpdate(bundle.clone());
-                    let serialized_bundle = bincode::serialize(&message_bundle)
-                        .expect("message bundle serialization failed");
-                    vega_socket
-                        .send(&serialized_bundle, 0)
-                        .expect("failed to send bundle");
-                    let expected_block = provider_clone.get_block_number().await.unwrap() + 1;
+                    let serialized_bundle = match bincode::serialize(&message_bundle) {
+                        Ok(bundle) => bundle,
+                        Err(e) => {
+                            error!("Failed to serialize message bundle: {e}");
+                            continue;
+                        }
+                    };
+                    match vega_socket.send(&serialized_bundle, 0) {
+                        Ok(_) => (),
+                        Err(e) => {
+                            error!("Failed to send bundle to Vega: {e}");
+                            continue;
+                        }
+                    };
+                    let expected_block = match provider_clone.get_block_number().await {
+                        Ok(block) => block + 1,
+                        Err(e) => {
+                            warn!("Failed to get block number: {e}");
+                            u64::MIN
+                        }
+                    };
                     info!(
                         message = "Price update sent to Vega",
                         trace_id = %bundle.trace_id,
@@ -295,13 +312,16 @@ async fn main() {
                         tx_hash = %format!("{:?}", tx_hash),
                     );
                 }
-                vega_socket.disconnect(VEGA_INBOUND_ENDPOINT).unwrap();
+                match vega_socket.disconnect(VEGA_INBOUND_ENDPOINT) {
+                    Ok(_) => (),
+                    Err(e) => warn!("Failed to disconnect from vega inbound socket: {e}"),
+                };
             }
         });
 
         tokio::select! {
-            _ = receiver_handle => eprintln!("Receiver handle ended. This should NEVER happen during operation."),
-            _ = processor_handle => eprintln!("Processor handle ended. This should NEVER happen during operation."),
+            _ = receiver_handle => error!("Receiver handle ended. This should NEVER happen during operation."),
+            _ = processor_handle => error!("Processor handle ended. This should NEVER happen during operation."),
         }
 
         sleep(Duration::from_secs(SECONDS_BEFORE_RECONNECTION)).await;
