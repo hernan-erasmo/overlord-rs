@@ -11,10 +11,7 @@ use overlord_shared_types::{MessageBundle, PriceUpdateBundle};
 use std::{
     error::Error,
     fs::File,
-    io::{
-        self,
-        BufRead,
-    },
+    io::{self, BufRead},
     path::Path,
     str::FromStr,
 };
@@ -23,14 +20,8 @@ use tokio::{
     time::{sleep, Duration},
 };
 use tracing::info;
-use tracing_appender::rolling::{
-    self,
-    Rotation,
-};
-use tracing_subscriber::fmt::{
-    time::LocalTime,
-    writer::BoxMakeWriter,
-};
+use tracing_appender::rolling::{self, Rotation};
+use tracing_subscriber::fmt::{time::LocalTime, writer::BoxMakeWriter};
 
 sol!(
     #[allow(missing_docs)]
@@ -168,7 +159,8 @@ fn _init_addresses(file_path: String) -> Result<Vec<Address>, Box<dyn Error>> {
 }
 
 fn _setup_logging() {
-    let log_file = rolling::RollingFileAppender::new(Rotation::DAILY, "/var/log/overlord-rs", "oops-rs.log");
+    let log_file =
+        rolling::RollingFileAppender::new(Rotation::DAILY, "/var/log/overlord-rs", "oops-rs.log");
     let file_writer = BoxMakeWriter::new(log_file);
     tracing_subscriber::fmt()
         .with_writer(file_writer)
@@ -181,8 +173,8 @@ fn _setup_logging() {
 async fn main() {
     _setup_logging();
 
-    let allowed_addresses =
-        _init_addresses(String::from(PATH_TO_ADDRESSES_INPUT)).expect("Failed to initialize addresses");
+    let allowed_addresses = _init_addresses(String::from(PATH_TO_ADDRESSES_INPUT))
+        .expect("Failed to initialize addresses");
 
     loop {
         // Outer loop to restart IPC on major connection issues
