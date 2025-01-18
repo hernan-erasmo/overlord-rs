@@ -86,7 +86,7 @@ fn get_price_from_input(tx_input: &Bytes) -> Result<(U256, Address), Box<dyn Err
     Ok((answer, forward_calldata.to))
 }
 
-/// This function reads the addresses of the addresses we identified as senders of
+/// This function reads the file of addresses we identified as senders of
 /// new price updates, so that we can filter pending transactions coming from these.
 fn read_addresses_from_file(filename: &str) -> io::Result<Vec<alloy::primitives::Address>> {
     let path = Path::new(filename);
@@ -169,12 +169,14 @@ fn _init_addresses(file_path: String) -> Result<Vec<Address>, Box<dyn Error>> {
             return Err(Box::new(e));
         }
     };
-    let addresses_str = allowed_addresses
-        .iter()
-        .map(|addr| format!("{:?}", addr))
-        .collect::<Vec<String>>()
-        .join(", ");
-    info!("Allowed addresses: {}", addresses_str);
+    info!(
+        "Addresses to listen for price updates: [{}]",
+        allowed_addresses
+            .iter()
+            .map(|addr| format!("{addr:?}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     Ok(allowed_addresses)
 }
 
