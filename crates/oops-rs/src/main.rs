@@ -19,7 +19,7 @@ use tokio::{
     sync::broadcast,
     time::{sleep, Duration},
 };
-use tracing::info;
+use tracing::{error, info};
 use tracing_appender::rolling::{self, Rotation};
 use tracing_subscriber::fmt::{time::LocalTime, writer::BoxMakeWriter};
 
@@ -54,8 +54,13 @@ fn get_price_from_input(tx_input: &Bytes) -> Result<(U256, Address), Box<dyn Err
     let forward_data = forward_calldata.data;
 
     // get `report` from transmit(bytes32[3] calldata reportContext, bytes calldata report, bytes32[] calldata rs, bytes32[] calldata ss, bytes32 rawVs)
-    let transmit_report = transmitCall::abi_decode(&forward_data, false).unwrap();
-    let transmit_report = transmit_report.report;
+    let transmit_report = match transmitCall::abi_decode(&forward_data, false) {
+        Ok(data) => data.report,
+        Err(e) => {
+            error!("Failed to decode transmit call: {e}");
+            return Err(Box::new(e));
+        }
+    };
 
     // this is what the function _decodeReport(bytes memory rawReport) of OCR2Aggregator.sol does
     let decoded_transmit_report = decode(
