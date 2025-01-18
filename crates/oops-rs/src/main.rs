@@ -54,6 +54,7 @@ const SECONDS_BEFORE_RECONNECTION: u64 = 2;
 const PATH_TO_ADDRESSES_INPUT: &str = "crates/oops-rs/addresses.txt";
 const VEGA_INBOUND_ENDPOINT: &str = "ipc:///tmp/vega_inbound";
 
+/// Extract the new price from the input data of a transaction
 fn get_price_from_input(tx_input: &Bytes) -> Result<(U256, Address), Box<dyn Error>> {
     // get `data` from forward(address to, bytes calldata data)
     let forward_calldata = match forwardCall::abi_decode(tx_input, false) {
@@ -85,6 +86,8 @@ fn get_price_from_input(tx_input: &Bytes) -> Result<(U256, Address), Box<dyn Err
     Ok((answer, forward_calldata.to))
 }
 
+/// This function reads the addresses of the addresses we identified as senders of
+/// new price updates, so that we can filter pending transactions coming from these.
 fn read_addresses_from_file(filename: &str) -> io::Result<Vec<alloy::primitives::Address>> {
     let path = Path::new(filename);
     let file = File::open(path)?;
@@ -152,6 +155,7 @@ fn is_transmit_call(tx_body: &Transaction) -> bool {
     selector_chunk.starts_with(&transmit_selector)
 }
 
+/// Get the list of addresses thah we will listen to for new price updates
 fn _init_addresses(file_path: String) -> Result<Vec<Address>, Box<dyn Error>> {
     let allowed_addresses =
         read_addresses_from_file(&file_path).expect("Failed to read addresses from file");
