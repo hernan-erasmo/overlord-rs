@@ -1,5 +1,7 @@
 use alloy::{
-    providers::{IpcConnect, Provider, ProviderBuilder},
+    primitives::FixedBytes,
+    providers::{IpcConnect, Provider, ProviderBuilder, RootProvider},
+    pubsub::{PubSubFrontend, Subscription},
     sol,
 };
 use alloy_primitives::keccak256;
@@ -49,9 +51,52 @@ fn _setup_logging() {
         .init();
 }
 
+#[derive(Debug)]
+enum WhistleblowerError {
+    ProviderError(String),
+    SubscriptionError(String),
+}
+
+impl std::error::Error for WhistleblowerError {}
+impl std::fmt::Display for WhistleblowerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WhistleblowerError::ProviderError(e) => write!(f, "Provider error: {}", e),
+            WhistleblowerError::SubscriptionError(e) => write!(f, "Subscription error: {}", e),
+        }
+    }
+}
+
+async fn setup_provider(ipc_url: String) -> Result<Arc<RootProvider<PubSubFrontend>>, WhistleblowerError> {
+    let ipc = IpcConnect::new(ipc_url);
+    ProviderBuilder::new()
+        .on_ipc(ipc)
+        .await
+        .map(Arc::new)
+        .map_err(|e| {
+            error!("Failed to connect to IPC: {}", e);
+            WhistleblowerError::ProviderError(e.to_string())
+        })
+}
+
+async fn setup_subscription(
+    provider: Arc<RootProvider<PubSubFrontend>>,
+    event_signature: FixedBytes<32>,
+    event_name: &str,
+) -> Result<Subscription<Log>, WhistleblowerError> {
+    provider
+        .subscribe_logs(&Filter::new().event_signature(event_signature))
+        .await
+        .map_err(|e| {
+            error!("Failed to subscribe to {} events: {}", event_name, e);
+            WhistleblowerError::SubscriptionError(e.to_string())
+        })
+}
+
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     _setup_logging();
+
     info!("Starting whistleblower-rs");
     let vega_context = zmq::Context::new();
     let vega_socket = vega_context.socket(zmq::PUSH).unwrap_or_else(|e| {
@@ -71,54 +116,39 @@ async fn main() {
     let repay_signature = keccak256("Repay(address,address,address,uint256,bool)".as_bytes());
 
     loop {
-        let ipc = IpcConnect::new(ipc_url.to_string());
-        let provider = match ProviderBuilder::new().on_ipc(ipc).await {
-            Ok(provider) => Arc::new(provider),
-            Err(e) => {
-                eprintln!("Failed to connect to IPC: {e}. Retrying in 5 seconds...");
-                sleep(Duration::from_secs(5)).await;
-                continue;
-            }
-        };
+        let provider = setup_provider(ipc_url.to_string()).await?;
 
-        let liquidation_call_sub = match provider.subscribe_logs(&Filter::new().event_signature(liquidation_call_signature)).await {
-            Ok(liquidation_call_sub) => liquidation_call_sub,
-            Err(e) => {
-                eprintln!("Failed to subscribe to liquidation calls: {e}. Retrying in 5 seconds...");
-                sleep(Duration::from_secs(5)).await;
-                continue;
-            }
-        };
+        let liquidation_sub = setup_subscription(
+            provider.clone(),
+            liquidation_call_signature,
+            "liquidation",
+        ).await?;
 
-        let borrow_sub = match provider.subscribe_logs(&Filter::new().event_signature(borrow_signature)).await {
-            Ok(borrow_sub) => borrow_sub,
-            Err(e) => {
-                eprintln!("Failed to subscribe to borrow events: {e}. Retrying in 5 seconds...");
-                sleep(Duration::from_secs(5)).await;
-                continue;
-            }
-        };
+        let borrow_sub = setup_subscription(
+            provider.clone(),
+            borrow_signature,
+            "borrow",
+        ).await?;
 
-        let supply_sub = match provider.subscribe_logs(&Filter::new().event_signature(supply_signature)).await {
-            Ok(supply_sub) => supply_sub,
-            Err(e) => {
-                eprintln!("Failed to subscribe to supply events: {e}. Retrying in 5 seconds...");
-                sleep(Duration::from_secs(5)).await;
-                continue;
-            }
-        };
+        let supply_sub = setup_subscription(
+            provider.clone(),
+            supply_signature,
+            "supply",
+        ).await?;
 
-        let repay_sub = match provider.subscribe_logs(&Filter::new().event_signature(repay_signature)).await {
-            Ok(repay_sub) => repay_sub,
-            Err(e) => {
-                eprintln!("Failed to subscribe to repay events: {e}. Retrying in 5 seconds...");
-                sleep(Duration::from_secs(5)).await;
-                continue;
-            }
-        };
+        let repay_sub = setup_subscription(
+            provider.clone(),
+            repay_signature,
+            "repay",
+        ).await?;
 
-        let mut all_event_streams = select_all(vec![liquidation_call_sub.into_stream(), borrow_sub.into_stream(), supply_sub.into_stream(), repay_sub.into_stream()]);
-        eprintln!("Listening for interesting transactions...");
+        let mut all_event_streams = select_all(vec![
+            liquidation_sub.into_stream(),
+            borrow_sub.into_stream(),
+            supply_sub.into_stream(),
+            repay_sub.into_stream()]
+        );
+        info!("Listening for interesting transactions...");
 
         while let Some(log) = all_event_streams.next().await {
             let block_number = log.block_number.unwrap_or_default();
