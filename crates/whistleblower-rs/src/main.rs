@@ -155,7 +155,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match log.topics().get(0) {
                 Some(topic) if topic == &liquidation_call_signature => {
                     let AAVE_V3_POOL::LiquidationCall { collateralAsset, debtAsset, user, debtToCover, liquidatedCollateralAmount, liquidator, .. } = log.log_decode().expect("Failed to decode LiquidationCall event").inner.data;
-                    eprintln!("LIQUIDATION CALL (block: {:?}) - collateralAsset: {}, debtAsset: {}, user: {}, debtToCover: {}, liquidatedCollateralAmount: {}, liquidator: {}", block_number, collateralAsset, debtAsset, user, debtToCover, liquidatedCollateralAmount, liquidator);
+                    info!(block = ?block_number, collateral_asset = %collateralAsset, debt_asset = %debtAsset, user = %user, debt_to_cover = %debtToCover, liquidated_collateral = %liquidatedCollateralAmount, liquidator = %liquidator, "LIQUIDATION CALL");
                     let event_details = WhistleblowerEventDetails {
                         event: WhistleblowerEventType::LiquidationCall,
                         args: vec![
@@ -171,7 +171,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Some(topic) if topic == &borrow_signature => {
                     let AAVE_V3_POOL::Borrow { reserve, onBehalfOf, .. } = log.log_decode().expect("Failed to decode Borrow event").inner.data;
-                    eprintln!("BORROW (block: {:?}) - reserve: {}, onBehalfOf: {}", block_number, reserve, onBehalfOf);
+                    info!(block = ?block_number, reserve = %reserve, on_behalf_of = %onBehalfOf, "BORROW");
                     let event_details = WhistleblowerEventDetails {
                         event: WhistleblowerEventType::Borrow,
                         args: vec![
@@ -183,7 +183,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Some(topic) if topic == &supply_signature => {
                     let AAVE_V3_POOL::Supply { reserve, onBehalfOf, .. } = log.log_decode().expect("Failed to decode Supply event").inner.data;
-                    eprintln!("SUPPLY (block: {:?}) - reserve: {}, onBehalfOf: {}", block_number, reserve, onBehalfOf);
+                    info!(block = ?block_number, reserve = %reserve, on_behalf_of = %onBehalfOf, "SUPPLY");
                     let event_details = WhistleblowerEventDetails {
                         event: WhistleblowerEventType::Supply,
                         args: vec![
@@ -195,7 +195,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Some(topic) if topic == &repay_signature => {
                     let AAVE_V3_POOL::Repay { reserve, user, .. } = log.log_decode().expect("Failed to decode Repay event").inner.data;
-                    eprintln!("REPAY (block: {:?}) - reserve: {}, user: {}", block_number, reserve, user);
+                    info!(block = ?block_number, reserve = %reserve, user = %user, "REPAY");
                     let event_details = WhistleblowerEventDetails {
                         event: WhistleblowerEventType::Repay,
                         args: vec![
@@ -206,11 +206,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     send_whistleblower_update(&log, &event_details, &vega_socket);
                 }
                 _ => {
-                    eprintln!("Unknown event or empty log topics detected: {:?}", log);
+                    warn!("Unknown event or empty log topics detected: {:?}", log);
                 }
             }
         };
-        eprintln!("Stream closed. Reconnecting in 5 seconds...");
+        warn!("Stream closed. Reconnecting in 5 seconds...");
         sleep(Duration::from_secs(5)).await;
     }
 }
