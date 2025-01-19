@@ -9,9 +9,9 @@ bincode.workspace = true
 chrono.workspace = true
 ethers-core.workspace = true
 futures-util.workspace = true
-tracing = true
-tracing-subscriber = true
-tracing-appender true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
 hex.workspace = true
 overlord-shared-types.workspace = true
 tokio.workspace = true
