@@ -14,4 +14,7 @@ futures-util.workspace = true
 hex.workspace = true
 overlord-shared-types.workspace = true
 tokio.workspace = true
+tracing = true
+tracing-subscriber = true
+tracing-appender true
 zmq.workspace = true
