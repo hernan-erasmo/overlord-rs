@@ -13,6 +13,9 @@ use overlord_shared_types::{
 };
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
+use tracing::{error, info, warn};
+use tracing_appender::rolling::{self, Rotation};
+use tracing_subscriber::fmt::{time::LocalTime, writer::BoxMakeWriter};
 
 sol!(
     #[allow(missing_docs)]
@@ -35,18 +38,33 @@ fn send_whistleblower_update(log: &Log, event_details: &WhistleblowerEventDetail
     eprintln!("Whistleblower {:?} update sent to Vega", event_details.event);
 }
 
+fn _setup_logging() {
+    let log_file =
+        rolling::RollingFileAppender::new(Rotation::DAILY, "/var/log/overlord-rs", "whistleblower-rs.log");
+    let file_writer = BoxMakeWriter::new(log_file);
+    tracing_subscriber::fmt()
+        .with_writer(file_writer)
+        .with_timer(LocalTime::rfc_3339())
+        .with_target(true)
+        .init();
+}
+
 #[tokio::main]
 async fn main() {
-    eprintln!("Starting whistleblower-rs");
+    _setup_logging();
+    info!("Starting whistleblower-rs");
     let vega_context = zmq::Context::new();
-    let vega_socket = vega_context.socket(zmq::PUSH).unwrap();
-    vega_socket
-        .connect("ipc:///tmp/vega_inbound")
-        .expect("Failed to connect to Vega");
-    eprintln!("Connected to vega");
+    let vega_socket = vega_context.socket(zmq::PUSH).unwrap_or_else(|e| {
+        error!("Failed to create ZMQ PUSH socket: {}", e);
+        std::process::exit(1);
+    });
+    if let Err(e) = vega_socket.connect("ipc:///tmp/vega_inbound") {
+        error!("Failed to connect to Vega IPC: {}", e);
+        std::process::exit(1);
+    }
+    info!("Connected to vega");
 
     let ipc_url = "/tmp/reth.ipc";
-
     let liquidation_call_signature = keccak256("LiquidationCall(address,address,address,uint256,uint256,address,bool)".as_bytes());
     let borrow_signature = keccak256("Borrow(address,address,address,uint256,uint8,uint256,uint16)".as_bytes());
     let supply_signature = keccak256("Supply(address,address,address,uint256,uint16)".as_bytes());
