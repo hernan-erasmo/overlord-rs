@@ -2,7 +2,9 @@
 addresses_*.txt
 *.ipc
 logs/
-hf-traces/
+hf-traces/*
+!hf-traces/.gitkeep
+!hf-traces/README.md
 output-vega-*.txt
 user_reserves_*.json
 init_hf_under_1*.txt
