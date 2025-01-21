@@ -2,19 +2,20 @@ use alloy::{
     primitives::{Address, U256},
     providers::{IpcConnect, ProviderBuilder},
 };
-
 use std::fs::File;
 use std::io::Write;
-
 use bincode::deserialize;
 use chrono::Local;
 use clap::Parser;
 use tokio::time::Instant;
-
 use overlord_shared_types::{
     MessageBundle,
     PriceUpdateBundle,
 };
+use std::error::Error;
+use tracing::{error, info, warn};
+use tracing_appender::rolling::{self, Rotation};
+use tracing_subscriber::fmt::{time::LocalTime, writer::BoxMakeWriter};
 use vega_rs::user_reserve_cache::UserReservesCache;
 use vega_rs::calc_utils::get_hf_for_users;
 use vega_rs::fork_provider::ForkProvider;
@@ -51,14 +52,14 @@ async fn run_price_update_pipeline(
     let fork_provider = match ForkProvider::new(bundle).await {
         Ok(provider) => provider,
         Err(e) => {
-            eprintln!("Failed to spin up fork: {:?}", e);
+            warn!("Failed to spin up fork: {:?}", e);
             return;
         }
     };
     let trace_id = bundle.map_or("initial-run".to_string(), |b| b.trace_id.clone());
     let trace_id_clone = trace_id.clone();
     let alert_callback = move |address: Address, hf: U256, collateral: U256| {
-        println!(
+        info!(
             "ALERT | {} | {} has HF < 1: {} (total collateral {})",
             trace_id_clone, address, hf, collateral
         );
@@ -71,7 +72,7 @@ async fn run_price_update_pipeline(
     .await;
     let pipeline_processing_elapsed = pipeline_processing.elapsed().as_millis();
     let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    println!(
+    info!(
         "{} | pipeline:{} results | {} ms | {} candidates processed | {} with HF < 1",
         now,
         trace_id.clone(),
@@ -86,15 +87,15 @@ async fn run_price_update_pipeline(
     }
 }
 
-async fn _dump_initial_hf_results(user_buckets: Vec<Vec<Address>>) -> Result<(), String> {
+async fn _dump_initial_hf_results(user_buckets: Vec<Vec<Address>>) -> Result<(), Box<dyn Error>> {
     let init_hf_results_timer = Instant::now();
     let ipc_url = "/tmp/reth.ipc";
     let ipc = IpcConnect::new(ipc_url.to_string());
     let provider = match ProviderBuilder::new().on_ipc(ipc).await {
         Ok(provider) => provider,
         Err(e) => {
-            eprintln!("Failed to connect to IPC: {:?}", e);
-            return Err("Failed to connect to IPC".to_string());
+            error!("Failed to connect to IPC: {}", e);
+            return Err(Box::new(e));
         }
     };
     let init_hf_results = get_hf_for_users(
@@ -108,33 +109,56 @@ async fn _dump_initial_hf_results(user_buckets: Vec<Vec<Address>>) -> Result<(),
         writeln!(init_hf_results_file, "{:?}: {}", address, hf).expect("Failed to write to init HF results file");
     }
     let init_hf_results_elapsed = init_hf_results_timer.elapsed().as_millis();
-    eprintln!("Initial HF results dumped into {} in {} ms", init_hf_results_filepath, init_hf_results_elapsed);
+    info!(filepath = init_hf_results_filepath, elapsed_ms = init_hf_results_elapsed, "Initial HF results dumped");
     Ok(())
+}
+
+fn _setup_logging() {
+    let log_file =
+        rolling::RollingFileAppender::new(Rotation::DAILY, "/var/log/overlord-rs", "vega-rs.log");
+    let file_writer = BoxMakeWriter::new(log_file);
+    tracing_subscriber::fmt()
+        .with_writer(file_writer)
+        .with_timer(LocalTime::rfc_3339())
+        .with_target(true)
+        .init();
 }
 
 #[tokio::main]
 async fn main() -> Result<(), String> {
+    _setup_logging();
+
     let parse = VegaArgs::parse();
     let args = parse;
 
-    eprintln!("Running with {} buckets", args.buckets);
+    info!(buckets = args.buckets, "vega-rs starting");
     let mut user_reserves_cache = UserReservesCache::new();
     let user_buckets = user_reserves_cache.initialize_cache(&args.addresses_file, &args.chainlink_addresses_file).await.expect("Problem initializing cache");
 
     if let Err(e) = _dump_initial_hf_results(user_buckets).await {
-        eprintln!("Failed to dump initial HF results: {:?}", e);
-        return Err(e);
+        error!("Failed to dump initial HF results: {:?}", e);
+        std::process::exit(1);
     }
 
     // Create IPC file and start listening for price updates
     let context = zmq::Context::new();
-    let inbound_socket = context.socket(zmq::PULL).unwrap();
-    inbound_socket
-        .bind(VEGA_INBOUND_ENDPOINT)
-        .expect("Failed to bind inbound socket");
-    eprintln!("VEGA is running and listening for price updates...");
+    let inbound_socket = match context.socket(zmq::PULL) {
+        Ok(socket) => socket,
+        Err(e) => {
+            error!("Failed to create ZMQ socket: {}", e);
+            std::process::exit(1);
+        }
+    };
 
+    match inbound_socket.bind(VEGA_INBOUND_ENDPOINT) {
+        Ok(_) => info!("Successfully bound to {}", VEGA_INBOUND_ENDPOINT),
+        Err(e) => {
+            error!("Failed to bind socket to {}: {}", VEGA_INBOUND_ENDPOINT, e);
+            std::process::exit(1);
+        }
+    };
     loop {
+        info!("VEGA is running and listening for price updates...");
         let msg = inbound_socket
             .recv_bytes(0)
             .expect("Failed to receive inbound update...");
@@ -145,7 +169,7 @@ async fn main() -> Result<(), String> {
                 run_price_update_pipeline(&mut user_reserves_cache, Some(&price_update)).await;
             }
             MessageBundle::WhistleblowerNotification(whistleblower_update) => {
-                eprintln!("Received whistleblower update: {:?}", whistleblower_update);
+                info!(update_details = ?whistleblower_update, "Received whistleblower update");
                 user_reserves_cache.update_cache(&whistleblower_update).await;
             }
         };
