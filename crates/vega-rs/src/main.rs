@@ -81,9 +81,19 @@ async fn run_price_update_pipeline(
         results.under_1_hf.len()
     );
     let hf_traces_filepath = format!("hf-traces/{}.txt", trace_id);
-    let mut hf_traces_file = File::create(hf_traces_filepath).expect("Failed to create HF traces file");
+    let hf_traces_file = match File::create(hf_traces_filepath.clone()) {
+        Ok(file) => file,
+        Err(e) => {
+            warn!("Failed to create HF traces file {}: {}", hf_traces_filepath, e);
+            return;
+        }
+    };
+    let mut hf_traces_file = hf_traces_file;
     for (address, hf) in results.raw_results.iter() {
-        writeln!(hf_traces_file, "{:?} {}", address, hf).expect("Failed to write to HF traces file");
+        if let Err(e) = writeln!(hf_traces_file, "{:?} {}", address, hf) {
+            warn!("Failed to write to HF traces file {}: {}", hf_traces_filepath, e);
+            return;
+        }
     }
 }
 
@@ -104,9 +114,19 @@ async fn _dump_initial_hf_results(user_buckets: Vec<Vec<Address>>) -> Result<(),
         None::<fn(Address, U256, U256)>
     ).await;
     let init_hf_results_filepath = format!("init_hf_under_1_results_{}.txt", Local::now().format("%Y%m%d"));
-    let mut init_hf_results_file = File::create(init_hf_results_filepath.clone()).expect("Failed to create init HF results file");
+    let init_hf_results_file = match File::create(init_hf_results_filepath.clone()) {
+        Ok(file) => file,
+        Err(e) => {
+            error!("Failed to create init HF results file: {}", e);
+            return Err(Box::new(e));
+        }
+    };
+    let mut init_hf_results_file = init_hf_results_file;
     for (address, hf) in init_hf_results.under_1_hf.iter() {
-        writeln!(init_hf_results_file, "{:?}: {}", address, hf).expect("Failed to write to init HF results file");
+        if let Err(e) = writeln!(init_hf_results_file, "{:?}: {}", address, hf) {
+            error!("Failed to write to init HF results file: {}", e);
+            return Err(Box::new(e));
+        }
     }
     let init_hf_results_elapsed = init_hf_results_timer.elapsed().as_millis();
     info!(filepath = init_hf_results_filepath, elapsed_ms = init_hf_results_elapsed, "Initial HF results dumped");
@@ -131,7 +151,13 @@ async fn main() -> Result<(), String> {
     let args = VegaArgs::parse();
     info!(buckets = args.buckets, "vega-rs starting");
     let mut user_reserves_cache = UserReservesCache::new();
-    let user_buckets = user_reserves_cache.initialize_cache(&args.addresses_file, &args.chainlink_addresses_file).await.expect("Problem initializing cache");
+    let user_buckets = match user_reserves_cache.initialize_cache(&args.addresses_file, &args.chainlink_addresses_file).await {
+        Ok(buckets) => buckets,
+        Err(e) => {
+            error!("Failed to initialize cache: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     if let Err(e) = _dump_initial_hf_results(user_buckets).await {
         error!("Failed to dump initial HF results: {:?}", e);
@@ -157,11 +183,20 @@ async fn main() -> Result<(), String> {
     };
     loop {
         info!("VEGA is running and listening for price updates...");
-        let msg = inbound_socket
-            .recv_bytes(0)
-            .expect("Failed to receive inbound update...");
-        let deserialized_message: MessageBundle =
-            deserialize(&msg).expect("Failed to deserialize inbound update");
+        let msg = match inbound_socket.recv_bytes(0) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                warn!("Failed to receive inbound update: {}", e);
+                continue;
+            }
+        };
+        let deserialized_message = match deserialize::<MessageBundle>(&msg) {
+            Ok(message) => message,
+            Err(e) => {
+                warn!("Failed to deserialize inbound update: {}", e);
+                continue;
+            }
+        };
         match deserialized_message {
             MessageBundle::PriceUpdate(price_update) => {
                 run_price_update_pipeline(&mut user_reserves_cache, Some(&price_update)).await;
