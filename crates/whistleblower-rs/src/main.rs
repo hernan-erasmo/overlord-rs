@@ -1,3 +1,4 @@
+use alloy::rpc::types::{Filter, Log};
 use alloy::{
     primitives::{FixedBytes, U64},
     providers::{IpcConnect, Provider, ProviderBuilder, RootProvider},
@@ -5,13 +6,9 @@ use alloy::{
     sol,
 };
 use alloy_primitives::keccak256;
-use alloy::rpc::types::{Filter, Log};
 use futures_util::{stream::select_all, StreamExt};
 use overlord_shared_types::{
-    MessageBundle,
-    WhistleblowerUpdate,
-    WhistleblowerEventDetails,
-    WhistleblowerEventType,
+    MessageBundle, WhistleblowerEventDetails, WhistleblowerEventType, WhistleblowerUpdate,
 };
 use std::{collections::HashMap, sync::Arc};
 use tokio::time::{sleep, Duration};
@@ -39,26 +36,44 @@ impl std::fmt::Display for WhistleblowerError {
         match self {
             WhistleblowerError::ProviderError(e) => write!(f, "Provider error: {}", e),
             WhistleblowerError::SubscriptionError(e) => write!(f, "Subscription error: {}", e),
-            WhistleblowerError::EventProcessingError(e) => write!(f, "Event processing error: {}", e),
+            WhistleblowerError::EventProcessingError(e) => {
+                write!(f, "Event processing error: {}", e)
+            }
         }
     }
 }
 
 trait EventProcessor {
-    fn process(&self, log: &Log, block_number: U64) -> Result<WhistleblowerEventDetails, WhistleblowerError>;
+    fn process(
+        &self,
+        log: &Log,
+        block_number: U64,
+    ) -> Result<WhistleblowerEventDetails, WhistleblowerError>;
 }
 
 struct LiquidationCallProcessor;
 
 impl EventProcessor for LiquidationCallProcessor {
-    fn process(&self, log: &Log, block_number: U64) -> Result<WhistleblowerEventDetails, WhistleblowerError> {
-        let decoded = log.log_decode()
-            .map_err(|e| WhistleblowerError::EventProcessingError(format!("Failed to decode LiquidationCall event: {}", e)))?;
+    fn process(
+        &self,
+        log: &Log,
+        block_number: U64,
+    ) -> Result<WhistleblowerEventDetails, WhistleblowerError> {
+        let decoded = log.log_decode().map_err(|e| {
+            WhistleblowerError::EventProcessingError(format!(
+                "Failed to decode LiquidationCall event: {}",
+                e
+            ))
+        })?;
 
         let AAVE_V3_POOL::LiquidationCall {
-            collateralAsset, debtAsset, user,
-            debtToCover, liquidatedCollateralAmount,
-            liquidator, ..
+            collateralAsset,
+            debtAsset,
+            user,
+            debtToCover,
+            liquidatedCollateralAmount,
+            liquidator,
+            ..
         } = decoded.inner.data;
 
         info!(
@@ -89,12 +104,22 @@ impl EventProcessor for LiquidationCallProcessor {
 struct BorrowProcessor;
 
 impl EventProcessor for BorrowProcessor {
-    fn process(&self, log: &Log, block_number: U64) -> Result<WhistleblowerEventDetails, WhistleblowerError> {
-        let decoded = log.log_decode()
-            .map_err(|e| WhistleblowerError::EventProcessingError(format!("Failed to decode Borrow event: {}", e)))?;
+    fn process(
+        &self,
+        log: &Log,
+        block_number: U64,
+    ) -> Result<WhistleblowerEventDetails, WhistleblowerError> {
+        let decoded = log.log_decode().map_err(|e| {
+            WhistleblowerError::EventProcessingError(format!(
+                "Failed to decode Borrow event: {}",
+                e
+            ))
+        })?;
 
         let AAVE_V3_POOL::Borrow {
-            reserve, onBehalfOf, ..
+            reserve,
+            onBehalfOf,
+            ..
         } = decoded.inner.data;
 
         info!(
@@ -106,10 +131,7 @@ impl EventProcessor for BorrowProcessor {
 
         Ok(WhistleblowerEventDetails {
             event: WhistleblowerEventType::Borrow,
-            args: vec![
-                reserve.to_string(),
-                onBehalfOf.to_string(),
-            ],
+            args: vec![reserve.to_string(), onBehalfOf.to_string()],
         })
     }
 }
@@ -117,12 +139,22 @@ impl EventProcessor for BorrowProcessor {
 struct SupplyProcessor;
 
 impl EventProcessor for SupplyProcessor {
-    fn process(&self, log: &Log, block_number: U64) -> Result<WhistleblowerEventDetails, WhistleblowerError> {
-        let decoded = log.log_decode()
-            .map_err(|e| WhistleblowerError::EventProcessingError(format!("Failed to decode Supply event: {}", e)))?;
+    fn process(
+        &self,
+        log: &Log,
+        block_number: U64,
+    ) -> Result<WhistleblowerEventDetails, WhistleblowerError> {
+        let decoded = log.log_decode().map_err(|e| {
+            WhistleblowerError::EventProcessingError(format!(
+                "Failed to decode Supply event: {}",
+                e
+            ))
+        })?;
 
         let AAVE_V3_POOL::Supply {
-            reserve, onBehalfOf, ..
+            reserve,
+            onBehalfOf,
+            ..
         } = decoded.inner.data;
 
         info!(
@@ -134,10 +166,7 @@ impl EventProcessor for SupplyProcessor {
 
         Ok(WhistleblowerEventDetails {
             event: WhistleblowerEventType::Supply,
-            args: vec![
-                reserve.to_string(),
-                onBehalfOf.to_string(),
-            ],
+            args: vec![reserve.to_string(), onBehalfOf.to_string()],
         })
     }
 }
@@ -145,13 +174,16 @@ impl EventProcessor for SupplyProcessor {
 struct RepayProcessor;
 
 impl EventProcessor for RepayProcessor {
-    fn process(&self, log: &Log, block_number: U64) -> Result<WhistleblowerEventDetails, WhistleblowerError> {
-        let decoded = log.log_decode()
-            .map_err(|e| WhistleblowerError::EventProcessingError(format!("Failed to decode Repay event: {}", e)))?;
+    fn process(
+        &self,
+        log: &Log,
+        block_number: U64,
+    ) -> Result<WhistleblowerEventDetails, WhistleblowerError> {
+        let decoded = log.log_decode().map_err(|e| {
+            WhistleblowerError::EventProcessingError(format!("Failed to decode Repay event: {}", e))
+        })?;
 
-        let AAVE_V3_POOL::Repay {
-            reserve, user, ..
-        } = decoded.inner.data;
+        let AAVE_V3_POOL::Repay { reserve, user, .. } = decoded.inner.data;
 
         info!(
             block = ?block_number,
@@ -162,17 +194,23 @@ impl EventProcessor for RepayProcessor {
 
         Ok(WhistleblowerEventDetails {
             event: WhistleblowerEventType::Repay,
-            args: vec![
-                reserve.to_string(),
-                user.to_string(),
-            ],
+            args: vec![reserve.to_string(), user.to_string()],
         })
     }
 }
 
-fn send_whistleblower_update(log: &Log, event_details: &WhistleblowerEventDetails, socket: &zmq::Socket) {
+fn send_whistleblower_update(
+    log: &Log,
+    event_details: &WhistleblowerEventDetails,
+    socket: &zmq::Socket,
+) {
     let event_update = WhistleblowerUpdate {
-        trace_id: log.transaction_hash.as_ref().map_or("".to_string(), |tx_hash| hex::encode(&tx_hash.0)[2..10].to_string()),
+        trace_id: log
+            .transaction_hash
+            .as_ref()
+            .map_or("".to_string(), |tx_hash| {
+                hex::encode(&tx_hash.0)[2..10].to_string()
+            }),
         block_number: log.block_number.unwrap_or_default(),
         event_details: event_details.clone(),
     };
@@ -192,8 +230,11 @@ fn send_whistleblower_update(log: &Log, event_details: &WhistleblowerEventDetail
 }
 
 fn _setup_logging() {
-    let log_file =
-        rolling::RollingFileAppender::new(Rotation::DAILY, "/var/log/overlord-rs", "whistleblower-rs.log");
+    let log_file = rolling::RollingFileAppender::new(
+        Rotation::DAILY,
+        "/var/log/overlord-rs",
+        "whistleblower-rs.log",
+    );
     let file_writer = BoxMakeWriter::new(log_file);
     tracing_subscriber::fmt()
         .with_writer(file_writer)
@@ -202,7 +243,9 @@ fn _setup_logging() {
         .init();
 }
 
-async fn setup_provider(ipc_url: String) -> Result<Arc<RootProvider<PubSubFrontend>>, WhistleblowerError> {
+async fn setup_provider(
+    ipc_url: String,
+) -> Result<Arc<RootProvider<PubSubFrontend>>, WhistleblowerError> {
     let ipc = IpcConnect::new(ipc_url);
     ProviderBuilder::new()
         .on_ipc(ipc)
@@ -245,51 +288,52 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Connected to vega");
 
     let ipc_url = "/tmp/reth.ipc";
-    let liquidation_call_signature = keccak256("LiquidationCall(address,address,address,uint256,uint256,address,bool)".as_bytes());
-    let borrow_signature = keccak256("Borrow(address,address,address,uint256,uint8,uint256,uint16)".as_bytes());
+    let liquidation_call_signature = keccak256(
+        "LiquidationCall(address,address,address,uint256,uint256,address,bool)".as_bytes(),
+    );
+    let borrow_signature =
+        keccak256("Borrow(address,address,address,uint256,uint8,uint256,uint16)".as_bytes());
     let supply_signature = keccak256("Supply(address,address,address,uint256,uint16)".as_bytes());
     let repay_signature = keccak256("Repay(address,address,address,uint256,bool)".as_bytes());
 
     let event_processors: HashMap<FixedBytes<32>, Box<dyn EventProcessor>> = [
-        (liquidation_call_signature, Box::new(LiquidationCallProcessor) as Box<dyn EventProcessor>),
-        (borrow_signature, Box::new(BorrowProcessor) as Box<dyn EventProcessor>),
-        (supply_signature, Box::new(SupplyProcessor) as Box<dyn EventProcessor>),
-        (repay_signature, Box::new(RepayProcessor) as Box<dyn EventProcessor>),
-    ].into();
+        (
+            liquidation_call_signature,
+            Box::new(LiquidationCallProcessor) as Box<dyn EventProcessor>,
+        ),
+        (
+            borrow_signature,
+            Box::new(BorrowProcessor) as Box<dyn EventProcessor>,
+        ),
+        (
+            supply_signature,
+            Box::new(SupplyProcessor) as Box<dyn EventProcessor>,
+        ),
+        (
+            repay_signature,
+            Box::new(RepayProcessor) as Box<dyn EventProcessor>,
+        ),
+    ]
+    .into();
 
     loop {
         let provider = setup_provider(ipc_url.to_string()).await?;
 
-        let liquidation_sub = setup_subscription(
-            provider.clone(),
-            liquidation_call_signature,
-            "liquidation",
-        ).await?;
+        let liquidation_sub =
+            setup_subscription(provider.clone(), liquidation_call_signature, "liquidation").await?;
 
-        let borrow_sub = setup_subscription(
-            provider.clone(),
-            borrow_signature,
-            "borrow",
-        ).await?;
+        let borrow_sub = setup_subscription(provider.clone(), borrow_signature, "borrow").await?;
 
-        let supply_sub = setup_subscription(
-            provider.clone(),
-            supply_signature,
-            "supply",
-        ).await?;
+        let supply_sub = setup_subscription(provider.clone(), supply_signature, "supply").await?;
 
-        let repay_sub = setup_subscription(
-            provider.clone(),
-            repay_signature,
-            "repay",
-        ).await?;
+        let repay_sub = setup_subscription(provider.clone(), repay_signature, "repay").await?;
 
         let mut all_event_streams = select_all(vec![
             liquidation_sub.into_stream(),
             borrow_sub.into_stream(),
             supply_sub.into_stream(),
-            repay_sub.into_stream()]
-        );
+            repay_sub.into_stream(),
+        ]);
         info!("Listening for interesting transactions...");
 
         while let Some(log) = all_event_streams.next().await {
