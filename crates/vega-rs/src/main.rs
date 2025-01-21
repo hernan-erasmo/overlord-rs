@@ -128,9 +128,7 @@ fn _setup_logging() {
 async fn main() -> Result<(), String> {
     _setup_logging();
 
-    let parse = VegaArgs::parse();
-    let args = parse;
-
+    let args = VegaArgs::parse();
     info!(buckets = args.buckets, "vega-rs starting");
     let mut user_reserves_cache = UserReservesCache::new();
     let user_buckets = user_reserves_cache.initialize_cache(&args.addresses_file, &args.chainlink_addresses_file).await.expect("Problem initializing cache");
