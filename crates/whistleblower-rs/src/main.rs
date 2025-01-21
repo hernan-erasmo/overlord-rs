@@ -1,5 +1,5 @@
 use alloy::{
-    primitives::FixedBytes,
+    primitives::{FixedBytes, U64},
     providers::{IpcConnect, Provider, ProviderBuilder, RootProvider},
     pubsub::{PubSubFrontend, Subscription},
     sol,
@@ -13,7 +13,7 @@ use overlord_shared_types::{
     WhistleblowerEventDetails,
     WhistleblowerEventType,
 };
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tokio::time::{sleep, Duration};
 use tracing::{error, info, warn};
 use tracing_appender::rolling::{self, Rotation};
@@ -26,6 +26,150 @@ sol!(
     "src/abi/aave_v3_pool.json",
 );
 
+#[derive(Debug)]
+enum WhistleblowerError {
+    ProviderError(String),
+    SubscriptionError(String),
+    EventProcessingError(String),
+}
+
+impl std::error::Error for WhistleblowerError {}
+impl std::fmt::Display for WhistleblowerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WhistleblowerError::ProviderError(e) => write!(f, "Provider error: {}", e),
+            WhistleblowerError::SubscriptionError(e) => write!(f, "Subscription error: {}", e),
+            WhistleblowerError::EventProcessingError(e) => write!(f, "Event processing error: {}", e),
+        }
+    }
+}
+
+trait EventProcessor {
+    fn process(&self, log: &Log, block_number: U64) -> Result<WhistleblowerEventDetails, WhistleblowerError>;
+}
+
+struct LiquidationCallProcessor;
+
+impl EventProcessor for LiquidationCallProcessor {
+    fn process(&self, log: &Log, block_number: U64) -> Result<WhistleblowerEventDetails, WhistleblowerError> {
+        let decoded = log.log_decode()
+            .map_err(|e| WhistleblowerError::EventProcessingError(format!("Failed to decode LiquidationCall event: {}", e)))?;
+
+        let AAVE_V3_POOL::LiquidationCall {
+            collateralAsset, debtAsset, user,
+            debtToCover, liquidatedCollateralAmount,
+            liquidator, ..
+        } = decoded.inner.data;
+
+        info!(
+            block = ?block_number,
+            collateral_asset = %collateralAsset,
+            debt_asset = %debtAsset,
+            user = %user,
+            debt_to_cover = %debtToCover,
+            liquidated_collateral = %liquidatedCollateralAmount,
+            liquidator = %liquidator,
+            "LIQUIDATION CALL"
+        );
+
+        Ok(WhistleblowerEventDetails {
+            event: WhistleblowerEventType::LiquidationCall,
+            args: vec![
+                collateralAsset.to_string(),
+                debtAsset.to_string(),
+                user.to_string(),
+                debtToCover.to_string(),
+                liquidatedCollateralAmount.to_string(),
+                liquidator.to_string(),
+            ],
+        })
+    }
+}
+
+struct BorrowProcessor;
+
+impl EventProcessor for BorrowProcessor {
+    fn process(&self, log: &Log, block_number: U64) -> Result<WhistleblowerEventDetails, WhistleblowerError> {
+        let decoded = log.log_decode()
+            .map_err(|e| WhistleblowerError::EventProcessingError(format!("Failed to decode Borrow event: {}", e)))?;
+
+        let AAVE_V3_POOL::Borrow {
+            reserve, onBehalfOf, ..
+        } = decoded.inner.data;
+
+        info!(
+            block = ?block_number,
+            reserve = %reserve,
+            on_behalf_of = %onBehalfOf,
+            "BORROW"
+        );
+
+        Ok(WhistleblowerEventDetails {
+            event: WhistleblowerEventType::Borrow,
+            args: vec![
+                reserve.to_string(),
+                onBehalfOf.to_string(),
+            ],
+        })
+    }
+}
+
+struct SupplyProcessor;
+
+impl EventProcessor for SupplyProcessor {
+    fn process(&self, log: &Log, block_number: U64) -> Result<WhistleblowerEventDetails, WhistleblowerError> {
+        let decoded = log.log_decode()
+            .map_err(|e| WhistleblowerError::EventProcessingError(format!("Failed to decode Supply event: {}", e)))?;
+
+        let AAVE_V3_POOL::Supply {
+            reserve, onBehalfOf, ..
+        } = decoded.inner.data;
+
+        info!(
+            block = ?block_number,
+            reserve = %reserve,
+            on_behalf_of = %onBehalfOf,
+            "SUPPLY"
+        );
+
+        Ok(WhistleblowerEventDetails {
+            event: WhistleblowerEventType::Supply,
+            args: vec![
+                reserve.to_string(),
+                onBehalfOf.to_string(),
+            ],
+        })
+    }
+}
+
+struct RepayProcessor;
+
+impl EventProcessor for RepayProcessor {
+    fn process(&self, log: &Log, block_number: U64) -> Result<WhistleblowerEventDetails, WhistleblowerError> {
+        let decoded = log.log_decode()
+            .map_err(|e| WhistleblowerError::EventProcessingError(format!("Failed to decode Repay event: {}", e)))?;
+
+        let AAVE_V3_POOL::Repay {
+            reserve, user, ..
+        } = decoded.inner.data;
+
+        info!(
+            block = ?block_number,
+            reserve = %reserve,
+            user = %user,
+            "REPAY"
+        );
+
+        Ok(WhistleblowerEventDetails {
+            event: WhistleblowerEventType::Repay,
+            args: vec![
+                reserve.to_string(),
+                user.to_string(),
+            ],
+        })
+    }
+}
+
 fn send_whistleblower_update(log: &Log, event_details: &WhistleblowerEventDetails, socket: &zmq::Socket) {
     let event_update = WhistleblowerUpdate {
         trace_id: log.transaction_hash.as_ref().map_or("".to_string(), |tx_hash| hex::encode(&tx_hash.0)[2..10].to_string()),
@@ -33,11 +177,18 @@ fn send_whistleblower_update(log: &Log, event_details: &WhistleblowerEventDetail
         event_details: event_details.clone(),
     };
     let message_bundle = MessageBundle::WhistleblowerNotification(event_update);
-    let serialized_update = bincode::serialize(&message_bundle).expect("Whistleblower update serialization failed");
-    socket
-        .send(&serialized_update, 0)
-        .expect("Failed to send Whistleblower update");
-    eprintln!("Whistleblower {:?} update sent to Vega", event_details.event);
+    let serialized_update = match bincode::serialize(&message_bundle) {
+        Ok(update) => update,
+        Err(e) => {
+            warn!("Failed to serialize Whistleblower update: {}", e);
+            return;
+        }
+    };
+    if let Err(e) = socket.send(&serialized_update, 0) {
+        warn!("Failed to send Whistleblower update: {}", e);
+        return;
+    }
+    info!(event_type = ?event_details.event, "Whistleblower update sent to Vega");
 }
 
 fn _setup_logging() {
@@ -49,22 +200,6 @@ fn _setup_logging() {
         .with_timer(LocalTime::rfc_3339())
         .with_target(true)
         .init();
-}
-
-#[derive(Debug)]
-enum WhistleblowerError {
-    ProviderError(String),
-    SubscriptionError(String),
-}
-
-impl std::error::Error for WhistleblowerError {}
-impl std::fmt::Display for WhistleblowerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            WhistleblowerError::ProviderError(e) => write!(f, "Provider error: {}", e),
-            WhistleblowerError::SubscriptionError(e) => write!(f, "Subscription error: {}", e),
-        }
-    }
 }
 
 async fn setup_provider(ipc_url: String) -> Result<Arc<RootProvider<PubSubFrontend>>, WhistleblowerError> {
@@ -115,6 +250,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let supply_signature = keccak256("Supply(address,address,address,uint256,uint16)".as_bytes());
     let repay_signature = keccak256("Repay(address,address,address,uint256,bool)".as_bytes());
 
+    let event_processors: HashMap<FixedBytes<32>, Box<dyn EventProcessor>> = [
+        (liquidation_call_signature, Box::new(LiquidationCallProcessor) as Box<dyn EventProcessor>),
+        (borrow_signature, Box::new(BorrowProcessor) as Box<dyn EventProcessor>),
+        (supply_signature, Box::new(SupplyProcessor) as Box<dyn EventProcessor>),
+        (repay_signature, Box::new(RepayProcessor) as Box<dyn EventProcessor>),
+    ].into();
+
     loop {
         let provider = setup_provider(ipc_url.to_string()).await?;
 
@@ -151,65 +293,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!("Listening for interesting transactions...");
 
         while let Some(log) = all_event_streams.next().await {
-            let block_number = log.block_number.unwrap_or_default();
-            match log.topics().get(0) {
-                Some(topic) if topic == &liquidation_call_signature => {
-                    let AAVE_V3_POOL::LiquidationCall { collateralAsset, debtAsset, user, debtToCover, liquidatedCollateralAmount, liquidator, .. } = log.log_decode().expect("Failed to decode LiquidationCall event").inner.data;
-                    info!(block = ?block_number, collateral_asset = %collateralAsset, debt_asset = %debtAsset, user = %user, debt_to_cover = %debtToCover, liquidated_collateral = %liquidatedCollateralAmount, liquidator = %liquidator, "LIQUIDATION CALL");
-                    let event_details = WhistleblowerEventDetails {
-                        event: WhistleblowerEventType::LiquidationCall,
-                        args: vec![
-                            collateralAsset.to_string(),
-                            debtAsset.to_string(),
-                            user.to_string(),
-                            debtToCover.to_string(),
-                            liquidatedCollateralAmount.to_string(),
-                            liquidator.to_string(),
-                        ],
-                    };
-                    send_whistleblower_update(&log, &event_details, &vega_socket);
-                }
-                Some(topic) if topic == &borrow_signature => {
-                    let AAVE_V3_POOL::Borrow { reserve, onBehalfOf, .. } = log.log_decode().expect("Failed to decode Borrow event").inner.data;
-                    info!(block = ?block_number, reserve = %reserve, on_behalf_of = %onBehalfOf, "BORROW");
-                    let event_details = WhistleblowerEventDetails {
-                        event: WhistleblowerEventType::Borrow,
-                        args: vec![
-                            reserve.to_string(),
-                            onBehalfOf.to_string(),
-                        ],
-                    };
-                    send_whistleblower_update(&log, &event_details, &vega_socket);
-                }
-                Some(topic) if topic == &supply_signature => {
-                    let AAVE_V3_POOL::Supply { reserve, onBehalfOf, .. } = log.log_decode().expect("Failed to decode Supply event").inner.data;
-                    info!(block = ?block_number, reserve = %reserve, on_behalf_of = %onBehalfOf, "SUPPLY");
-                    let event_details = WhistleblowerEventDetails {
-                        event: WhistleblowerEventType::Supply,
-                        args: vec![
-                            reserve.to_string(),
-                            onBehalfOf.to_string(),
-                        ],
-                    };
-                    send_whistleblower_update(&log, &event_details, &vega_socket);
-                }
-                Some(topic) if topic == &repay_signature => {
-                    let AAVE_V3_POOL::Repay { reserve, user, .. } = log.log_decode().expect("Failed to decode Repay event").inner.data;
-                    info!(block = ?block_number, reserve = %reserve, user = %user, "REPAY");
-                    let event_details = WhistleblowerEventDetails {
-                        event: WhistleblowerEventType::Repay,
-                        args: vec![
-                            reserve.to_string(),
-                            user.to_string(),
-                        ],
-                    };
-                    send_whistleblower_update(&log, &event_details, &vega_socket);
-                }
-                _ => {
+            let block_number = U64::from(log.block_number.unwrap_or_default());
+            if let Some(event_signature) = log.topics().get(0) {
+                if let Some(event_processor) = event_processors.get(event_signature) {
+                    match event_processor.process(&log, block_number) {
+                        Ok(event_details) => {
+                            send_whistleblower_update(&log, &event_details, &vega_socket);
+                        }
+                        Err(e) => {
+                            warn!("Failed to process event: {}", e);
+                        }
+                    }
+                } else {
                     warn!("Unknown event or empty log topics detected: {:?}", log);
                 }
+            } else {
+                warn!("Empty log topics detected: {:?}", log);
             }
-        };
+        }
         warn!("Stream closed. Reconnecting in 5 seconds...");
         sleep(Duration::from_secs(5)).await;
     }
