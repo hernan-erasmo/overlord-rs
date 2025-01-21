@@ -19,6 +19,7 @@ use std::collections::HashSet;
 use serde_json::json;
 use std::fs::OpenOptions;
 use std::io::Write;
+use tracing::{error, info, warn};
 
 sol!(
     #[allow(missing_docs)]
@@ -170,7 +171,7 @@ impl UserReservesCache {
     }
 
     pub async fn initialize_cache(&mut self, addresses_file: &str, chainlink_addresses_file: &str) -> Result<Vec<Vec<UserAddress>>, Box<dyn Error>> {
-        eprintln!("Initializing UserReservesCache");
+        info!("Initializing UserReservesCache");
         // Step 0: Initialize stats
         let mut stats = UserReservesCacheInitStats {
             input_user_addresses: 0,
@@ -182,8 +183,20 @@ impl UserReservesCache {
         };
 
         // Step 1: Load and prepare user and contract addresses
-        self.chainlink_address_to_asset = load_chainlink_addresses(&chainlink_addresses_file).expect("Failed to load chainlink addresses");
-        let user_addresses: Vec<UserAddress> = load_addresses_from_file(&addresses_file).expect("Failed to load addresses from file");
+        self.chainlink_address_to_asset = match load_chainlink_addresses(&chainlink_addresses_file) {
+            Ok(addresses) => addresses,
+            Err(e) => {
+                error!("Failed to load chainlink addresses: {}", e);
+                return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "Failed to load chainlink addresses")));
+            }
+        };
+        let user_addresses: Vec<UserAddress> = match load_addresses_from_file(&addresses_file) {
+            Ok(addresses) => addresses,
+            Err(e) => {
+                error!("Failed to load addresses from file: {}", e);
+                return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "Failed to load addresses from file")));
+            }
+        };
         stats.input_user_addresses = user_addresses.len();
         let user_addresses: Vec<UserAddress> = user_addresses.into_iter().collect::<HashSet<_>>().into_iter().collect();
         let user_addresses_buckets: Vec<Vec<UserAddress>> = user_addresses.chunks(BUCKETS).map(|chunk| chunk.to_vec()).collect();
@@ -194,15 +207,21 @@ impl UserReservesCache {
         let provider = ProviderBuilder::new().on_ipc(ipc).await?;
 
         // Step 3: Get information about user positions
-        eprintln!("Getting user positions");
-        let positions_by_user: HashMap<UserAddress, Vec<UserPosition>> = get_positions_by_user(&user_addresses_buckets, &provider).await.expect("Failed to get positions by user");
+        info!("Getting user positions");
+        let positions_by_user: HashMap<UserAddress, Vec<UserPosition>> = match get_positions_by_user(&user_addresses_buckets, &provider).await {
+            Ok(positions) => positions,
+            Err(e) => {
+                error!("Failed to get positions by user: {}", e);
+                return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "Failed to get positions by user")));
+            }
+        };
 
         // Step 4: Re-arrange the information into users by position by asset
         let user_by_position_by_asset: HashMap<ReserveAddress, HashMap<PositionType, Vec<UserAddress>>> = generate_user_by_position_by_asset(positions_by_user);
         self.user_reserves_cache = RwLock::new(user_by_position_by_asset);
 
         self._collect_and_dump_cache_init_stats(&mut stats).await?;
-        eprintln!("Cache init complete. Stats: {:?}", stats);
+        info!(initialization_stats = ?stats, "Cache init complete");
         Ok(user_addresses_buckets)
     }
 
@@ -351,19 +370,29 @@ fn load_chainlink_addresses(filepath: &str) -> Result<HashMap<ChainlinkContractA
         let line = line?;
         let parts: Vec<&str> = line.split(",").collect();
         let symbol = parts[0].to_string();
-        let reserve_address = Address::from_str(parts[1]).expect("Failed to parse AAVE reserve address");
-        let chainlink_address = Address::from_str(parts[2]).expect("Failed to parse chainlink address");
-
+        let reserve_address = match Address::from_str(parts[1]) {
+            Ok(addr) => addr,
+            Err(e) => {
+                error!("Failed to parse AAVE reserve address: {}", e);
+                return Err(Box::new(e));
+            }
+        };
+        let chainlink_address = match Address::from_str(parts[2]) {
+            Ok(addr) => addr,
+            Err(e) => {
+                error!("Failed to parse chainlink address: {}", e);
+                return Err(Box::new(e));
+            }
+        };
         let reserve_info = AaveReserveInfo {
             symbol,
             reserve_address,
         };
-
         chainlink_addresses.entry(chainlink_address)
             .or_insert_with(Vec::new)
             .push(reserve_info);
     }
-    eprintln!("Loaded {} chainlink addresses.", chainlink_addresses.len());
+    info!("Loaded {} chainlink addresses.", chainlink_addresses.len());
     Ok(chainlink_addresses)
 }
 
@@ -407,7 +436,7 @@ async fn get_positions_by_user(
                             results.insert(address.clone(), user_positions);
                         }
                     }
-                    Err(e) => eprintln!("Couldn't calculate address reserves: {:?}", e),
+                    Err(e) => warn!("Couldn't calculate address reserves: {:?}", e),
                 }
             }
             results
