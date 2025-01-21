@@ -19,10 +19,12 @@ use tracing_subscriber::fmt::{time::LocalTime, writer::BoxMakeWriter};
 sol!(
     #[allow(missing_docs)]
     #[sol(rpc)]
+    #[allow(clippy::too_many_arguments)]
     AAVE_V3_POOL,
     "src/abi/aave_v3_pool.json",
 );
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug)]
 enum WhistleblowerError {
     ProviderError(String),
@@ -209,7 +211,7 @@ fn send_whistleblower_update(
             .transaction_hash
             .as_ref()
             .map_or("".to_string(), |tx_hash| {
-                hex::encode(&tx_hash.0)[2..10].to_string()
+                hex::encode(tx_hash.0)[2..10].to_string()
             }),
         block_number: log.block_number.unwrap_or_default(),
         event_details: event_details.clone(),
@@ -338,7 +340,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         while let Some(log) = all_event_streams.next().await {
             let block_number = U64::from(log.block_number.unwrap_or_default());
-            if let Some(event_signature) = log.topics().get(0) {
+            if let Some(event_signature) = log.topics().first() {
                 if let Some(event_processor) = event_processors.get(event_signature) {
                     match event_processor.process(&log, block_number) {
                         Ok(event_details) => {
