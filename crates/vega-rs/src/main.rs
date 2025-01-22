@@ -203,7 +203,9 @@ async fn main() -> Result<(), String> {
             }
             MessageBundle::WhistleblowerNotification(whistleblower_update) => {
                 info!(update_details = ?whistleblower_update, "Received whistleblower update");
-                user_reserves_cache.update_cache(&whistleblower_update).await;
+                if let Err(e) = user_reserves_cache.update_cache(&whistleblower_update).await {
+                    warn!("Failed to update cache: {}", e);
+                }
             }
         };
     }

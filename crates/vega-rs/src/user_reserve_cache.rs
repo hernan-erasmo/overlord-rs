@@ -88,7 +88,7 @@ impl UserReservesCache {
     /// whether the user cache must be updated depending on it's event type. Liquidations, borrows,
     /// supplyings, and repayments are the events that can affect whether a user is borrowing or supplying
     /// a given asset.
-    pub async fn update_cache(&mut self, wb_update: &WhistleblowerUpdate) {
+    pub async fn update_cache(&mut self, wb_update: &WhistleblowerUpdate) -> Result<(), Box<dyn std::error::Error>> {
         let update_type = &wb_update.event_details.event;
         let affected_user_index;
 
@@ -103,15 +103,31 @@ impl UserReservesCache {
                 affected_user_index = 2;
             }
             _ => {
-                eprintln!("Update type {:?} shouldn't trigger a user cache update. Skipping.", update_type);
-                return;
+                warn!("Update type {:?} shouldn't trigger a user cache update. Skipping.", update_type);
+                return Ok(());
             }
         }
-        let affected_user_arg = wb_update.event_details.args.get(affected_user_index).expect("Failed to get the affected user arg");
-        let affected_user = Address::from_str(affected_user_arg).expect("Failed to parse affected user");
+
+        let affected_user_arg = match wb_update.event_details.args.get(affected_user_index) {
+            Some(arg) => arg,
+            None => {
+                warn!("Failed to get affected user arg at index {}. Args: {:?}", affected_user_index, wb_update.event_details.args);
+                return Err("Missing affected user argument".into());
+            }
+        };
+
+        let affected_user = match Address::from_str(affected_user_arg) {
+            Ok(address) => address,
+            Err(e) => {
+                warn!("Failed to parse affected user address: {}", e);
+                return Err(e.into());
+            }
+        };
+
         self._drop_user_from_cache(&affected_user).await;
         self._add_user_to_cache(&affected_user).await;
-        eprintln!("Cache updated, all write locks released.");
+        info!("Cache updated, all write locks released.");
+        Ok(())
     }
 
     /// Removes the user from the cache. This is done by iterating over all the assets in the cache and
