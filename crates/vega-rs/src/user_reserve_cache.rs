@@ -23,6 +23,7 @@ use tracing::{error, info, warn};
 
 sol!(
     #[allow(missing_docs)]
+    #[allow(clippy::too_many_arguments)]
     #[sol(rpc)]
     AaveUIPoolDataProvider,
     "src/abis/aave_ui_pool_data_provider.json"
@@ -39,8 +40,8 @@ const BUCKETS: usize = 64;
 
 #[derive(Debug, Eq, PartialEq, Hash)]
 enum PositionType {
-    BORROWED,
-    COLLATERAL,
+    Borrowed,
+    Collateral,
 }
 
 #[derive(Debug)]
@@ -76,6 +77,12 @@ pub struct UserReservesCache {
     chainlink_address_to_asset: HashMap<ChainlinkContractAddress, Vec<AaveReserveInfo>>,
 }
 
+impl Default for UserReservesCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UserReservesCache {
     pub fn new() -> Self {
         UserReservesCache {
@@ -94,17 +101,16 @@ impl UserReservesCache {
         wb_update: &WhistleblowerUpdate,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let update_type = &wb_update.event_details.event;
-        let affected_user_index;
 
         #[allow(unreachable_patterns)] // so rustc doesn't complain about the default case
-        match update_type {
+        let affected_user_index = match update_type {
             WhistleblowerEventType::Repay
             | WhistleblowerEventType::Borrow
             | WhistleblowerEventType::Supply => {
-                affected_user_index = 1;
+                1
             }
             WhistleblowerEventType::LiquidationCall => {
-                affected_user_index = 2;
+                2
             }
             _ => {
                 warn!(
@@ -113,7 +119,7 @@ impl UserReservesCache {
                 );
                 return Ok(());
             }
-        }
+        };
 
         let affected_user_arg = match wb_update.event_details.args.get(affected_user_index) {
             Some(arg) => arg,
@@ -162,12 +168,12 @@ impl UserReservesCache {
     /// 1. calls getUserReservesData for the given user address
     /// 2. parses the result into a list of UserPosition
     /// 3. for each UserPosition, it updates the cache by adding the user to the list of users that are borrowing
-    ///   or supplying that asset.
+    ///     or supplying that asset.
     async fn _add_user_to_cache(
         &mut self,
         user: &UserAddress,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let user_address = user.clone();
+        let user_address = *user;
         let ipc_path = "/tmp/reth.ipc";
         let ipc = IpcConnect::new(ipc_path.to_string());
         let provider = match ProviderBuilder::new().on_ipc(ipc).await {
@@ -179,10 +185,11 @@ impl UserReservesCache {
         };
         let ui_data =
             AaveUIPoolDataProvider::new(AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, provider.clone());
+        #[allow(unused_assignments)]
         let mut user_positions: Vec<UserPosition> = vec![];
         info!("Getting reserve data information for user {}", user_address);
         let result = ui_data
-            .getUserReservesData(AAVE_V3_PROVIDER_ADDRESS, user_address.clone())
+            .getUserReservesData(AAVE_V3_PROVIDER_ADDRESS, user_address)
             .call()
             .await;
         match result {
@@ -217,17 +224,17 @@ impl UserReservesCache {
             };
             if position.scaled_variable_debt > U256::ZERO {
                 let users_vector = users_by_position
-                    .entry(PositionType::BORROWED)
+                    .entry(PositionType::Borrowed)
                     .or_insert_with(Vec::new);
-                users_vector.push(user_address.clone());
+                users_vector.push(user_address);
             }
             if position.usage_as_collateral_enabled_on_user
                 && position.scaled_atoken_balance > U256::ZERO
             {
                 let users_vector = users_by_position
-                    .entry(PositionType::COLLATERAL)
+                    .entry(PositionType::Collateral)
                     .or_insert_with(Vec::new);
-                users_vector.push(user_address.clone());
+                users_vector.push(user_address);
             }
         }
         Ok(())
@@ -250,7 +257,7 @@ impl UserReservesCache {
         };
 
         // Step 1: Load and prepare user and contract addresses
-        self.chainlink_address_to_asset = match load_chainlink_addresses(&chainlink_addresses_file)
+        self.chainlink_address_to_asset = match load_chainlink_addresses(chainlink_addresses_file)
         {
             Ok(addresses) => addresses,
             Err(e) => {
@@ -261,7 +268,7 @@ impl UserReservesCache {
                 )));
             }
         };
-        let user_addresses: Vec<UserAddress> = match load_addresses_from_file(&addresses_file) {
+        let user_addresses: Vec<UserAddress> = match load_addresses_from_file(addresses_file) {
             Ok(addresses) => addresses,
             Err(e) => {
                 error!("Failed to load addresses from file: {}", e);
@@ -330,11 +337,11 @@ impl UserReservesCache {
         let cache = self.user_reserves_cache.read().await;
         for (asset, users_by_position) in cache.iter() {
             let borrowed_for_asset = users_by_position
-                .get(&PositionType::BORROWED)
+                .get(&PositionType::Borrowed)
                 .unwrap_or(&vec![])
                 .len();
             let used_as_collateral = users_by_position
-                .get(&PositionType::COLLATERAL)
+                .get(&PositionType::Collateral)
                 .unwrap_or(&vec![])
                 .len();
             stats.total_user_addresses_in_cache += borrowed_for_asset + used_as_collateral;
@@ -510,7 +517,7 @@ fn load_chainlink_addresses(
         };
         chainlink_addresses
             .entry(chainlink_address)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(reserve_info);
     }
     info!("Loaded {} chainlink addresses.", chainlink_addresses.len());
@@ -536,20 +543,20 @@ fn load_addresses_from_file(filepath: &str) -> Result<Vec<UserAddress>, Box<dyn 
 }
 
 async fn get_positions_by_user(
-    address_buckets: &Vec<Vec<UserAddress>>,
+    address_buckets: &[Vec<UserAddress>],
     provider: &RootProvider<PubSubFrontend>,
 ) -> Result<HashMap<UserAddress, Vec<UserPosition>>, Box<dyn Error>> {
     let mut tasks = vec![];
     let ui_data =
         AaveUIPoolDataProvider::new(AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, provider.clone());
-    for bucket in address_buckets.clone() {
+    for bucket in address_buckets.iter().cloned() {
         let ui_data = ui_data.clone();
         let task = task::spawn(async move {
             let mut results: HashMap<UserAddress, Vec<UserPosition>> = HashMap::new();
             for address in bucket {
                 // returns (UserReserveData[] memory, uint8)
                 let result = ui_data
-                    .getUserReservesData(AAVE_V3_PROVIDER_ADDRESS, address.clone())
+                    .getUserReservesData(AAVE_V3_PROVIDER_ADDRESS, address)
                     .call()
                     .await;
                 match result {
@@ -566,7 +573,7 @@ async fn get_positions_by_user(
                             })
                             .collect();
                         if !user_positions.is_empty() {
-                            results.insert(address.clone(), user_positions);
+                            results.insert(address, user_positions);
                         }
                     }
                     Err(e) => warn!("Couldn't calculate address reserves: {:?}", e),
@@ -599,15 +606,15 @@ fn generate_user_by_position_by_asset(
         for position in positions {
             // if the asset already exists, get it. Otherwise create an empty map for it
             let users_by_position = user_by_position_by_asset
-                .entry(position.underlying_asset.clone())
-                .or_insert_with(HashMap::new);
+                .entry(position.underlying_asset)
+                .or_default();
 
             if position.scaled_variable_debt > U256::ZERO {
                 // if the user has debt for that asset, add it to the borrowed vector or create a new empty one and then add it
                 let users_vector = users_by_position
-                    .entry(PositionType::BORROWED)
-                    .or_insert_with(Vec::new);
-                users_vector.push(user_address.clone());
+                    .entry(PositionType::Borrowed)
+                    .or_default();
+                users_vector.push(*user_address);
             }
 
             if position.usage_as_collateral_enabled_on_user
@@ -615,9 +622,9 @@ fn generate_user_by_position_by_asset(
             {
                 // if the user has balance for that asset (and can be used as collateral), add it to the collateral vector or create a new empty one and then add it
                 let users_vector = users_by_position
-                    .entry(PositionType::COLLATERAL)
-                    .or_insert_with(Vec::new);
-                users_vector.push(user_address.clone());
+                    .entry(PositionType::Collateral)
+                    .or_default();
+                users_vector.push(*user_address);
             }
         }
     }

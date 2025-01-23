@@ -56,7 +56,6 @@ async fn build_pub_tx(
         .gas_limit(forked_block.header.gas_limit)
         .max_fee_per_gas(max_fee)
         .max_priority_fee_per_gas(max_priority_fee)
-        .into()
 }
 
 pub struct ForkProvider {
