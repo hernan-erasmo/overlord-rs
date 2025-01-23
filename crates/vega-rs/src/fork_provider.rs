@@ -9,6 +9,7 @@ use alloy::{
 use eyre::Result;
 use overlord_shared_types::PriceUpdateBundle;
 use std::{fs::File, panic, sync::Arc};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 ////////////////////////////////////////////////////
@@ -72,10 +73,10 @@ pub struct ForkProvider {
 impl Drop for ForkProvider {
     fn drop(&mut self) {
         if let Err(e) = self._anvil_instance.child_mut().kill() {
-            eprintln!("Failed to kill AnvilInstance: {:?}", e);
+            error!("Failed to kill AnvilInstance: {:?}", e);
         }
         if let Err(e) = self._anvil_instance.child_mut().wait() {
-            eprintln!("Failed to wait for AnvilInstance to terminate: {:?}", e);
+            error!("Failed to wait for AnvilInstance to terminate: {:?}", e);
         }
     }
 }
@@ -100,7 +101,7 @@ impl ForkProvider {
         let provider = match ProviderBuilder::new().on_ipc(ipc).await {
             Ok(provider) => provider,
             Err(e) => {
-                eprintln!("Failed to connect to IPC: {:?}", e);
+                warn!("Failed to connect to IPC: {:?}", e);
                 return Err("Failed to connect to IPC".to_string());
             }
         };
@@ -113,7 +114,7 @@ impl ForkProvider {
         {
             Some(block) => block,
             None => {
-                eprintln!("Failed to get block for forking");
+                warn!("Failed to get block for forking");
                 return Err("Failed to get block for forking".to_string());
             }
         };
@@ -136,11 +137,11 @@ impl ForkProvider {
         let anvil = match result {
             Ok(anvil) => anvil,
             Err(e) => {
-                eprintln!("Anvil creation panicked: {:?}", e);
+                error!("Anvil creation panicked: {:?}", e);
                 return Err("Failed to create Anvil instance".to_string());
             }
         };
-        eprintln!(
+        info!(
             "Anvil fork started at block: {:?}",
             block_number_to_be_forked
         );
@@ -149,7 +150,7 @@ impl ForkProvider {
         let fork_provider: AnvilForkProvider = match ProviderBuilder::new().on_ipc(fork_ipc).await {
             Ok(provider) => Ok(provider),
             Err(e) => {
-                eprintln!("Failed to connect to fork IPC: {:?}", e);
+                error!("Failed to connect to fork IPC: {:?}", e);
                 return Err("Failed to connect to fork IPC".to_string());
             }
         };
@@ -171,7 +172,7 @@ impl ForkProvider {
             {
                 Ok(response) => response,
                 Err(e) => {
-                    eprintln!("Failed to send price update tx to fork: {:?}", e);
+                    error!("Failed to send price update tx to fork: {:?}", e);
                     return Err("Failed to send price update tx to fork".to_string());
                 }
             };
@@ -179,7 +180,7 @@ impl ForkProvider {
             let tx_receipt = match pending_tx.get_receipt().await {
                 Ok(receipt) => receipt,
                 Err(e) => {
-                    eprintln!("Failed to get receipt for price update tx: {:?}", e);
+                    error!("Failed to get receipt for price update tx: {:?}", e);
                     return Err("Failed to get receipt for price update tx".to_string());
                 }
             };
@@ -187,7 +188,7 @@ impl ForkProvider {
             let new_block_number = match fork_provider.as_ref().unwrap().get_block_number().await {
                 Ok(block) => block,
                 Err(e) => {
-                    eprintln!(
+                    error!(
                         "Failed to get block number after applying price update tx: {:?}",
                         e
                     );
@@ -196,9 +197,11 @@ impl ForkProvider {
                     );
                 }
             };
-            eprintln!(
-                "Applied bundle tx receipt for {} (new block: {}): {:?}",
-                bundle.trace_id, new_block_number, tx_receipt
+            info!(
+                trace_id = %bundle.trace_id,
+                block_number = %new_block_number,
+                receipt = ?tx_receipt,
+                "Applied bundle tx receipt"
             );
         }
         // Step 5: Return the fork provider with the new state

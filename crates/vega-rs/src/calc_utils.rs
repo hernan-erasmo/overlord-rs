@@ -10,6 +10,7 @@ use std::{
     sync::Arc,
 };
 use tokio::task;
+use tracing::warn;
 
 sol!(
     #[allow(missing_docs)]
@@ -59,7 +60,7 @@ where
                         }
                         bucket_results.insert(address, data.healthFactor);
                     }
-                    Err(e) => eprintln!("Couldn't calculate address HF: {:?}", e),
+                    Err(e) => warn!("Couldn't calculate address HF: {:?}", e),
                 }
             }
             bucket_results
