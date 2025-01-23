@@ -437,7 +437,14 @@ fn load_addresses_from_file(filepath: &str) -> Result<Vec<UserAddress>, Box<dyn 
     let mut addresses: Vec<UserAddress> = Vec::new();
     let file = File::open(filepath)?;
     for line in io::BufReader::new(file).lines() {
-        let address = Address::from_str(str::trim(&line.unwrap())).expect("Failed to parse address");
+        let line = line?;
+        let address = match Address::from_str(str::trim(&line)) {
+            Ok(addr) => addr,
+            Err(e) => {
+                warn!("Failed to parse address '{}': {}", line, e);
+                return Err(Box::new(e));
+            }
+        };
         addresses.push(address);
     }
     eprintln!("Loaded {} user addresses.", addresses.len());
