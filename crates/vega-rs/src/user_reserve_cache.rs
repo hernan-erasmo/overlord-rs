@@ -139,7 +139,7 @@ impl UserReservesCache {
     /// Removes the user from the cache. This is done by iterating over all the assets in the cache and
     /// removing the user from the list of users that are borrowing or supplying that asset.
     async fn _drop_user_from_cache(&mut self, user: &UserAddress) {
-        eprintln!("Dropping cache occurrences for user {}", user);
+        info!("Dropping cache occurrences for user {}", user);
         let mut cache = self.user_reserves_cache.write().await;
         for (_asset, users_by_position) in cache.iter_mut() {
             for (_position_type, users) in users_by_position.iter_mut() {
@@ -169,7 +169,7 @@ impl UserReservesCache {
             provider.clone()
         );
         let mut user_positions: Vec<UserPosition> = vec![];
-        eprintln!("Getting reserve data information for user {}", user_address);
+        info!("Getting reserve data information for user {}", user_address);
         let result = ui_data.getUserReservesData(AAVE_V3_PROVIDER_ADDRESS, user_address.clone()).call().await;
         match result {
             Ok(data) => {
@@ -368,14 +368,15 @@ impl UserReservesCache {
             .collect();
         let bundle_processing_elapsed = bundle_processing.elapsed().as_millis();
         let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-        eprintln!("{} | bundle:{} results | {} ms | {} total | {} unique | {:?} buckets | {}",
-            now,
-            &bundle.unwrap().trace_id,
-            bundle_processing_elapsed,
-            duplicate_candidates.len(),
-            unique_candidates.len(),
-            candidate_buckets.iter().map(|bucket| bucket.len()).collect::<Vec<_>>(),
-            log_message
+        info!(
+            timestamp = %now,
+            bundle_id = %bundle.unwrap().trace_id,
+            processing_time_ms = bundle_processing_elapsed,
+            total_candidates = duplicate_candidates.len(),
+            unique_candidates = unique_candidates.len(),
+            buckets = ?candidate_buckets.iter().map(|bucket| bucket.len()).collect::<Vec<_>>(),
+            asset_details = %log_message,
+            "Bundle processing complete"
         );
         candidate_buckets
     }
@@ -447,7 +448,7 @@ fn load_addresses_from_file(filepath: &str) -> Result<Vec<UserAddress>, Box<dyn 
         };
         addresses.push(address);
     }
-    eprintln!("Loaded {} user addresses.", addresses.len());
+    info!("Loaded {} user addresses.", addresses.len());
     Ok(addresses)
 }
 
