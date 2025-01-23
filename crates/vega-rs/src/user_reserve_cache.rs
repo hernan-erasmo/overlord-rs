@@ -125,7 +125,13 @@ impl UserReservesCache {
         };
 
         self._drop_user_from_cache(&affected_user).await;
-        self._add_user_to_cache(&affected_user).await;
+        match self._add_user_to_cache(&affected_user).await {
+            Ok(_) => (),
+            Err(e) => {
+                warn!("Failed to add user to cache: {}", e);
+                return Err(e);
+            }
+        };
         info!("Cache updated, all write locks released.");
         Ok(())
     }
@@ -147,11 +153,17 @@ impl UserReservesCache {
     /// 2. parses the result into a list of UserPosition
     /// 3. for each UserPosition, it updates the cache by adding the user to the list of users that are borrowing
     ///   or supplying that asset.
-    async fn _add_user_to_cache(&mut self, user: &UserAddress) {
+    async fn _add_user_to_cache(&mut self, user: &UserAddress) -> Result<(), Box<dyn std::error::Error>> {
         let user_address = user.clone();
         let ipc_path = "/tmp/reth.ipc";
         let ipc = IpcConnect::new(ipc_path.to_string());
-        let provider = ProviderBuilder::new().on_ipc(ipc).await.unwrap();
+        let provider = match ProviderBuilder::new().on_ipc(ipc).await {
+            Ok(p) => p,
+            Err(e) => {
+                warn!("Failed to create provider: {}", e);
+                return Err(e.into());
+            }
+        };
         let ui_data = AaveUIPoolDataProvider::new(
             AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS,
             provider.clone()
@@ -169,12 +181,20 @@ impl UserReservesCache {
                         underlying_asset: d.underlyingAsset,
                     }).collect();
             }
-            Err(e) => eprintln!("Couldn't calculate address reserves: {:?}", e),
+            Err(e) => {
+                warn!("Couldn't calculate address reserves: {:?}", e);
+                return Err(e.into());
+            }
         }
         let mut cache = self.user_reserves_cache.write().await;
         for position in user_positions {
-            let users_by_position = cache.get_mut(&position.underlying_asset)
-                .expect(&format!("ERROR - Underlying asset {} not found in user_reserves_cache", position.underlying_asset));
+            let users_by_position = match cache.get_mut(&position.underlying_asset) {
+                Some(ubp) => ubp,
+                None => {
+                    warn!("Underlying asset {} not found in user_reserves_cache", position.underlying_asset);
+                    return Err("Asset not found in cache".into());
+                }
+            };
             if position.scaled_variable_debt > U256::ZERO {
                 let users_vector = users_by_position.entry(PositionType::BORROWED).or_insert_with(Vec::new);
                 users_vector.push(user_address.clone());
@@ -184,6 +204,7 @@ impl UserReservesCache {
                 users_vector.push(user_address.clone());
             }
         }
+        Ok(())
     }
 
     pub async fn initialize_cache(&mut self, addresses_file: &str, chainlink_addresses_file: &str) -> Result<Vec<Vec<UserAddress>>, Box<dyn Error>> {
