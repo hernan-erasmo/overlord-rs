@@ -5,10 +5,7 @@ use alloy::{
     sol,
 };
 use futures::future::join_all;
-use std::{
-    collections::HashMap,
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 use tokio::task;
 use tracing::warn;
 

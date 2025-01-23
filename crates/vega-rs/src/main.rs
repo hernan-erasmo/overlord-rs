@@ -2,23 +2,20 @@ use alloy::{
     primitives::{Address, U256},
     providers::{IpcConnect, ProviderBuilder},
 };
-use std::fs::File;
-use std::io::Write;
 use bincode::deserialize;
 use chrono::Local;
 use clap::Parser;
-use tokio::time::Instant;
-use overlord_shared_types::{
-    MessageBundle,
-    PriceUpdateBundle,
-};
+use overlord_shared_types::{MessageBundle, PriceUpdateBundle};
 use std::error::Error;
+use std::fs::File;
+use std::io::Write;
+use tokio::time::Instant;
 use tracing::{error, info, warn};
 use tracing_appender::rolling::{self, Rotation};
 use tracing_subscriber::fmt::{time::LocalTime, writer::BoxMakeWriter};
-use vega_rs::user_reserve_cache::UserReservesCache;
 use vega_rs::calc_utils::get_hf_for_users;
 use vega_rs::fork_provider::ForkProvider;
+use vega_rs::user_reserve_cache::UserReservesCache;
 
 const VEGA_INBOUND_ENDPOINT: &str = "ipc:///tmp/vega_inbound";
 
@@ -84,14 +81,20 @@ async fn run_price_update_pipeline(
     let hf_traces_file = match File::create(hf_traces_filepath.clone()) {
         Ok(file) => file,
         Err(e) => {
-            warn!("Failed to create HF traces file {}: {}", hf_traces_filepath, e);
+            warn!(
+                "Failed to create HF traces file {}: {}",
+                hf_traces_filepath, e
+            );
             return;
         }
     };
     let mut hf_traces_file = hf_traces_file;
     for (address, hf) in results.raw_results.iter() {
         if let Err(e) = writeln!(hf_traces_file, "{:?} {}", address, hf) {
-            warn!("Failed to write to HF traces file {}: {}", hf_traces_filepath, e);
+            warn!(
+                "Failed to write to HF traces file {}: {}",
+                hf_traces_filepath, e
+            );
             return;
         }
     }
@@ -108,12 +111,12 @@ async fn _dump_initial_hf_results(user_buckets: Vec<Vec<Address>>) -> Result<(),
             return Err(Box::new(e));
         }
     };
-    let init_hf_results = get_hf_for_users(
-        user_buckets,
-        &provider,
-        None::<fn(Address, U256, U256)>
-    ).await;
-    let init_hf_results_filepath = format!("init_hf_under_1_results_{}.txt", Local::now().format("%Y%m%d"));
+    let init_hf_results =
+        get_hf_for_users(user_buckets, &provider, None::<fn(Address, U256, U256)>).await;
+    let init_hf_results_filepath = format!(
+        "init_hf_under_1_results_{}.txt",
+        Local::now().format("%Y%m%d")
+    );
     let init_hf_results_file = match File::create(init_hf_results_filepath.clone()) {
         Ok(file) => file,
         Err(e) => {
@@ -129,7 +132,11 @@ async fn _dump_initial_hf_results(user_buckets: Vec<Vec<Address>>) -> Result<(),
         }
     }
     let init_hf_results_elapsed = init_hf_results_timer.elapsed().as_millis();
-    info!(filepath = init_hf_results_filepath, elapsed_ms = init_hf_results_elapsed, "Initial HF results dumped");
+    info!(
+        filepath = init_hf_results_filepath,
+        elapsed_ms = init_hf_results_elapsed,
+        "Initial HF results dumped"
+    );
     Ok(())
 }
 
@@ -151,7 +158,10 @@ async fn main() -> Result<(), String> {
     let args = VegaArgs::parse();
     info!(buckets = args.buckets, "vega-rs starting");
     let mut user_reserves_cache = UserReservesCache::new();
-    let user_buckets = match user_reserves_cache.initialize_cache(&args.addresses_file, &args.chainlink_addresses_file).await {
+    let user_buckets = match user_reserves_cache
+        .initialize_cache(&args.addresses_file, &args.chainlink_addresses_file)
+        .await
+    {
         Ok(buckets) => buckets,
         Err(e) => {
             error!("Failed to initialize cache: {}", e);
@@ -203,7 +213,10 @@ async fn main() -> Result<(), String> {
             }
             MessageBundle::WhistleblowerNotification(whistleblower_update) => {
                 info!(update_details = ?whistleblower_update, "Received whistleblower update");
-                if let Err(e) = user_reserves_cache.update_cache(&whistleblower_update).await {
+                if let Err(e) = user_reserves_cache
+                    .update_cache(&whistleblower_update)
+                    .await
+                {
                     warn!("Failed to update cache: {}", e);
                 }
             }
