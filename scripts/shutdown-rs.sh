@@ -9,7 +9,8 @@ VALID_APPS=("vega-rs" "oops-rs" "whistleblower-rs")
 # Function to validate process name
 validate_process() {
     local pid=$1
-    local proc_name=$(ps -p "$pid" -o comm= 2>/dev/null)
+    # Below is required to prevent `ps` from truncating the process name
+    local proc_name=$(ps -p "$pid" -o args= 2>/dev/null | awk '{print $1}' | xargs basename 2>/dev/null)
     
     for app in "${VALID_APPS[@]}"; do
         if [ "$proc_name" = "$app" ]; then
