@@ -6,6 +6,7 @@ use bincode::deserialize;
 use chrono::Local;
 use clap::Parser;
 use overlord_shared_types::{MessageBundle, PriceUpdateBundle};
+use std::env;
 use std::error::Error;
 use std::fs::File;
 use std::io::Write;
@@ -18,6 +19,8 @@ use vega_rs::fork_provider::ForkProvider;
 use vega_rs::user_reserve_cache::UserReservesCache;
 
 const VEGA_INBOUND_ENDPOINT: &str = "ipc:///tmp/vega_inbound";
+const ADDRESSES_FILE_ENV: &str = "VEGA_ADDRESSES_FILE";
+const CHAINLINK_ADDRESSES_FILE_ENV: &str = "VEGA_CHAINLINK_ADDRESSES_FILE";
 
 #[derive(Parser)]
 #[clap(
@@ -29,12 +32,13 @@ const VEGA_INBOUND_ENDPOINT: &str = "ipc:///tmp/vega_inbound";
 struct VegaArgs {
     #[clap(long, default_value = "64")]
     buckets: usize,
+}
 
-    #[clap(long, default_value = "addresses.txt")]
-    addresses_file: String,
-
-    #[clap(long, default_value = "asset_to_contract_address_mapping.csv")]
-    chainlink_addresses_file: String,
+fn get_required_env_var(key: &str) -> Result<String, Box<dyn std::error::Error>> {
+    env::var(key).map_err(|e| {
+        error!("Environment variable {} not set: {}", key, e);
+        Box::new(e) as Box<dyn std::error::Error>
+    })
 }
 
 async fn run_price_update_pipeline(
@@ -77,7 +81,7 @@ async fn run_price_update_pipeline(
         results.raw_results.len(),
         results.under_1_hf.len()
     );
-    let hf_traces_filepath = format!("hf-traces/{}.txt", trace_id);
+    let hf_traces_filepath = format!("crates/vega-rs/hf-traces/{}.txt", trace_id);
     let hf_traces_file = match File::create(hf_traces_filepath.clone()) {
         Ok(file) => file,
         Err(e) => {
@@ -156,10 +160,25 @@ async fn main() -> Result<(), String> {
     _setup_logging();
 
     let args = VegaArgs::parse();
+
     info!(buckets = args.buckets, "vega-rs starting");
+    let addresses_file = match get_required_env_var(ADDRESSES_FILE_ENV) {
+        Ok(filename) => filename,
+        Err(e) => {
+            error!("Failed to get addresses file path: {}", e);
+            std::process::exit(1);
+        }
+    };
+    let chainlink_addresses_file = match get_required_env_var(CHAINLINK_ADDRESSES_FILE_ENV) {
+        Ok(filename) => filename,
+        Err(e) => {
+            error!("Failed to get chainlink addresses file path: {}", e);
+            std::process::exit(1);
+        }
+    };
     let mut user_reserves_cache = UserReservesCache::new();
     let user_buckets = match user_reserves_cache
-        .initialize_cache(&args.addresses_file, &args.chainlink_addresses_file)
+        .initialize_cache(&addresses_file, &chainlink_addresses_file)
         .await
     {
         Ok(buckets) => buckets,
@@ -191,8 +210,8 @@ async fn main() -> Result<(), String> {
             std::process::exit(1);
         }
     };
+    info!("VEGA is running and listening for price updates...");
     loop {
-        info!("VEGA is running and listening for price updates...");
         let msg = match inbound_socket.recv_bytes(0) {
             Ok(bytes) => bytes,
             Err(e) => {
