@@ -106,12 +106,8 @@ impl UserReservesCache {
         let affected_user_index = match update_type {
             WhistleblowerEventType::Repay
             | WhistleblowerEventType::Borrow
-            | WhistleblowerEventType::Supply => {
-                1
-            }
-            WhistleblowerEventType::LiquidationCall => {
-                2
-            }
+            | WhistleblowerEventType::Supply => 1,
+            WhistleblowerEventType::LiquidationCall => 2,
             _ => {
                 warn!(
                     "Update type {:?} shouldn't trigger a user cache update. Skipping.",
@@ -257,8 +253,7 @@ impl UserReservesCache {
         };
 
         // Step 1: Load and prepare user and contract addresses
-        self.chainlink_address_to_asset = match load_chainlink_addresses(chainlink_addresses_file)
-        {
+        self.chainlink_address_to_asset = match load_chainlink_addresses(chainlink_addresses_file) {
             Ok(addresses) => addresses,
             Err(e) => {
                 error!("Failed to load chainlink addresses: {}", e);
@@ -611,9 +606,7 @@ fn generate_user_by_position_by_asset(
 
             if position.scaled_variable_debt > U256::ZERO {
                 // if the user has debt for that asset, add it to the borrowed vector or create a new empty one and then add it
-                let users_vector = users_by_position
-                    .entry(PositionType::Borrowed)
-                    .or_default();
+                let users_vector = users_by_position.entry(PositionType::Borrowed).or_default();
                 users_vector.push(*user_address);
             }
 
