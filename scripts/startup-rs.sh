@@ -7,6 +7,8 @@ PID_DIR=".tmp/overlord-apps-pids"
 # export VEGA_RS_BIN_PATH=~/projects/overlord-rs/target/release/vega-rs
 # export OOPS_RS_BIN_PATH=~/projects/overlord-rs/target/release/oops-rs
 # export WHISTLEBLOWER_RS_BIN_PATH=~/projects/overlord-rs/target/release/whistleblower-rs
+# export VEGA_ADDRESSES_FILE=~/projects/overlord-rs/crates/vega-rs/addresses_20250124_77178.txt
+# export VEGA_CHAINLINK_ADDRESSES_FILE=~/projects/overlord-rs/crates/vega-rs/asset_to_contract_address_mapping_20250125153311.csv
 
 required_vars=("VEGA_RS_BIN_PATH" "WHISTLEBLOWER_RS_BIN_PATH" "OOPS_RS_BIN_PATH")
 missing_vars=()

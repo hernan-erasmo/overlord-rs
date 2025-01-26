@@ -14,6 +14,7 @@ validate_process() {
     
     for app in "${VALID_APPS[@]}"; do
         if [ "$proc_name" = "$app" ]; then
+            echo "About to shutdown $proc_name"
             return 0
         fi
     done
