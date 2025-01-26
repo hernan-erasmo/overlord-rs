@@ -6,18 +6,22 @@ use alloy::{
     sol,
     sol_types::SolCall,
 };
-use chrono::Local;
 use ethers_core::abi::{decode, ParamType};
 use overlord_shared_types::{MessageBundle, PriceUpdateBundle};
-use std::error::Error;
-use std::fs::File;
-use std::io::{self, BufRead};
-use std::path::Path;
-use std::str::FromStr;
+use std::{
+    error::Error,
+    fs::File,
+    io::{self, BufRead},
+    path::Path,
+    str::FromStr,
+};
 use tokio::{
     sync::broadcast,
     time::{sleep, Duration},
 };
+use tracing::{error, info, warn};
+use tracing_appender::rolling::{self, Rotation};
+use tracing_subscriber::fmt::{time::LocalTime, writer::BoxMakeWriter};
 
 sol!(
     #[allow(missing_docs)]
@@ -40,6 +44,7 @@ const SECONDS_BEFORE_RECONNECTION: u64 = 2;
 const PATH_TO_ADDRESSES_INPUT: &str = "crates/oops-rs/addresses.txt";
 const VEGA_INBOUND_ENDPOINT: &str = "ipc:///tmp/vega_inbound";
 
+/// Extract the new price from the input data of a transaction
 fn get_price_from_input(tx_input: &Bytes) -> Result<(U256, Address), Box<dyn Error>> {
     // get `data` from forward(address to, bytes calldata data)
     let forward_calldata = match forwardCall::abi_decode(tx_input, false) {
@@ -49,11 +54,16 @@ fn get_price_from_input(tx_input: &Bytes) -> Result<(U256, Address), Box<dyn Err
     let forward_data = forward_calldata.data;
 
     // get `report` from transmit(bytes32[3] calldata reportContext, bytes calldata report, bytes32[] calldata rs, bytes32[] calldata ss, bytes32 rawVs)
-    let transmit_report = transmitCall::abi_decode(&forward_data, false).unwrap();
-    let transmit_report = transmit_report.report;
+    let transmit_report = match transmitCall::abi_decode(&forward_data, false) {
+        Ok(data) => data.report,
+        Err(e) => {
+            error!("Failed to decode transmit call: {e}");
+            return Err(Box::new(e));
+        }
+    };
 
     // this is what the function _decodeReport(bytes memory rawReport) of OCR2Aggregator.sol does
-    let decoded_transmit_report = decode(
+    let decoded_transmit_report = match decode(
         &[
             ParamType::Uint(32),                             // observationsTimestamp
             ParamType::FixedBytes(32),                       // rawObservers
@@ -61,8 +71,13 @@ fn get_price_from_input(tx_input: &Bytes) -> Result<(U256, Address), Box<dyn Err
             ParamType::Int(192),                             // juelsPerFeeCoin
         ],
         &transmit_report,
-    )
-    .unwrap();
+    ) {
+        Ok(decoded) => decoded,
+        Err(e) => {
+            error!("Failed to decode transmit report: {}", e);
+            return Err(Box::new(e));
+        }
+    };
 
     let observations = decoded_transmit_report[2].clone().into_array().unwrap();
     let median = &observations[observations.len() / 2];
@@ -71,6 +86,8 @@ fn get_price_from_input(tx_input: &Bytes) -> Result<(U256, Address), Box<dyn Err
     Ok((answer, forward_calldata.to))
 }
 
+/// This function reads the file of addresses we identified as senders of
+/// new price updates, so that we can filter pending transactions coming from these.
 fn read_addresses_from_file(filename: &str) -> io::Result<Vec<alloy::primitives::Address>> {
     let path = Path::new(filename);
     let file = File::open(path)?;
@@ -79,7 +96,13 @@ fn read_addresses_from_file(filename: &str) -> io::Result<Vec<alloy::primitives:
     let mut addresses = Vec::new();
     for line in reader.lines() {
         let line = line?;
-        addresses.push(Address::from_str(str::trim(&line)).expect("Failed to parse address"));
+        match Address::from_str(line.trim()) {
+            Ok(address) => addresses.push(address),
+            Err(e) => {
+                error!("Failed to parse address from line '{}': {}", line, e);
+                continue;
+            }
+        };
     }
     Ok(addresses)
 }
@@ -126,34 +149,59 @@ fn is_transmit_call(tx_body: &Transaction) -> bool {
     // so we begin looking at position 100 because the transmit() selector
     // would be at slot 3 (check Input Data default view in etherscan)
     // so then 3 * 32 = 96 + 4 = 100
-    if tx_input.len() < 132 {
-        eprintln!(
+    let selector_chunk = tx_input.get(100..132).unwrap_or_else(|| {
+        warn!(
             "INVALID TRANSMIT: looked valid, but tx_input length ({}) is too short. tx_hash was {}",
             tx_input.len(),
             tx_body.hash
         );
-        return false;
-    }
-    let selector_chunk = &tx_input[100..132];
+        &[]
+    });
     selector_chunk.starts_with(&transmit_selector)
 }
 
+/// Get the list of addresses thah we will listen to for new price updates
 fn _init_addresses(file_path: String) -> Result<Vec<Address>, Box<dyn Error>> {
-    let allowed_addresses =
-        read_addresses_from_file(&file_path).expect("Failed to read addresses from file");
-    let addresses_str = allowed_addresses
-        .iter()
-        .map(|addr| format!("{:?}", addr))
-        .collect::<Vec<String>>()
-        .join(", ");
-    eprintln!("Allowed addresses: {}", addresses_str);
+    let allowed_addresses = match read_addresses_from_file(&file_path) {
+        Ok(addresses) => addresses,
+        Err(e) => {
+            error!("Failed to read addresses from file: {}", e);
+            return Err(Box::new(e));
+        }
+    };
+    info!(
+        "Addresses to listen for price updates: [{}]",
+        allowed_addresses
+            .iter()
+            .map(|addr| format!("{addr:?}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     Ok(allowed_addresses)
+}
+
+fn _setup_logging() {
+    let log_file =
+        rolling::RollingFileAppender::new(Rotation::DAILY, "/var/log/overlord-rs", "oops-rs.log");
+    let file_writer = BoxMakeWriter::new(log_file);
+    tracing_subscriber::fmt()
+        .with_writer(file_writer)
+        .with_timer(LocalTime::rfc_3339())
+        .with_target(true)
+        .init();
 }
 
 #[tokio::main]
 async fn main() {
-    let allowed_addresses =
-        _init_addresses(String::from(PATH_TO_ADDRESSES_INPUT)).expect("Failed to initialize addresses");
+    _setup_logging();
+
+    let allowed_addresses = match _init_addresses(String::from(PATH_TO_ADDRESSES_INPUT)) {
+        Ok(addresses) => addresses,
+        Err(e) => {
+            error!("Failed to initialize addresses: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     loop {
         // Outer loop to restart IPC on major connection issues
@@ -165,7 +213,7 @@ async fn main() {
                 client
             }
             Err(e) => {
-                eprintln!(
+                error!(
                     "Failed to connect to IPC: {e}. Retrying in {} seconds...",
                     SECONDS_BEFORE_RECONNECTION
                 );
@@ -177,24 +225,26 @@ async fn main() {
         let mut pending_tx_stream = match provider.subscribe_full_pending_transactions().await {
             Ok(stream) => stream,
             Err(e) => {
-                eprintln!("Failed to subscribe to pending transactions: {e}. Retrying...");
+                error!(
+                    "Failed to subscribe to pending transactions: {e}. Retrying in {} seconds...",
+                    SECONDS_BEFORE_RECONNECTION
+                );
+                sleep(Duration::from_secs(SECONDS_BEFORE_RECONNECTION)).await;
                 continue;
             }
         };
-
         let (tx_buffer, mut rx_buffer) = broadcast::channel::<Transaction>(1024);
-
         let receiver_handle = tokio::spawn(async move {
             loop {
                 match pending_tx_stream.recv().await {
                     Ok(tx_body) => {
                         if let Err(e) = tx_buffer.send(tx_body) {
-                            eprintln!("Failed to send tx to buffer: {e}");
+                            error!("Failed to send tx to buffer: {e}");
                             break;
                         }
                     }
                     Err(e) => {
-                        eprintln!("Unknow stream enqueue error: {e}");
+                        error!("Unknow stream enqueue error: {e}");
                         break;
                     }
                 }
@@ -207,9 +257,9 @@ async fn main() {
             let vega_context = zmq::Context::new();
             let vega_socket = vega_context.socket(zmq::PUSH).unwrap();
             match vega_socket.connect(VEGA_INBOUND_ENDPOINT) {
-                Ok(_) => eprintln!("Connected to vega"),
+                Ok(_) => info!("Connected to vega inbound endpoint"),
                 Err(e) => {
-                    eprintln!("Failed to connect to Vega: {e}");
+                    error!("Failed to connect to Vega: {e}");
                     continue;
                 }
             }
@@ -223,7 +273,7 @@ async fn main() {
                     let (tx_new_price, forward_to) = match get_price_from_input(&tx_body.input) {
                         Ok((price, to)) => (price, to),
                         Err(e) => {
-                            eprintln!("INVALID PRICE UPDATE: failed to get price from input: {e}");
+                            error!("INVALID PRICE UPDATE: failed to get price from input: {e}");
                             continue;
                         }
                     };
@@ -236,28 +286,44 @@ async fn main() {
                         tx_input: tx_body.input,
                     };
                     let message_bundle = MessageBundle::PriceUpdate(bundle.clone());
-                    let serialized_bundle = bincode::serialize(&message_bundle)
-                        .expect("message bundle serialization failed");
-                    vega_socket
-                        .send(&serialized_bundle, 0)
-                        .expect("failed to send bundle");
-                    eprintln!("Price update sent to Vega");
-                    let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-                    println!(
-                        "[{}] - {} - {} - https://etherscan.io/tx/{:?}",
-                        now,
-                        bundle.trace_id,
-                        (provider_clone.get_block_number().await.unwrap() + 1),
-                        tx_hash
+                    let serialized_bundle = match bincode::serialize(&message_bundle) {
+                        Ok(bundle) => bundle,
+                        Err(e) => {
+                            error!("Failed to serialize message bundle: {e}");
+                            continue;
+                        }
+                    };
+                    match vega_socket.send(&serialized_bundle, 0) {
+                        Ok(_) => (),
+                        Err(e) => {
+                            error!("Failed to send bundle to Vega: {e}");
+                            continue;
+                        }
+                    };
+                    let expected_block = match provider_clone.get_block_number().await {
+                        Ok(block) => block + 1,
+                        Err(e) => {
+                            warn!("Failed to get block number: {e}");
+                            u64::MIN
+                        }
+                    };
+                    info!(
+                        message = "Price update sent to Vega",
+                        trace_id = %bundle.trace_id,
+                        expected_block = %expected_block,
+                        tx_hash = %format!("{:?}", tx_hash),
                     );
                 }
-                vega_socket.disconnect(VEGA_INBOUND_ENDPOINT).unwrap();
+                match vega_socket.disconnect(VEGA_INBOUND_ENDPOINT) {
+                    Ok(_) => (),
+                    Err(e) => warn!("Failed to disconnect from vega inbound socket: {e}"),
+                };
             }
         });
 
         tokio::select! {
-            _ = receiver_handle => eprintln!("Receiver handle ended. This should NEVER happen during operation."),
-            _ = processor_handle => eprintln!("Processor handle ended. This should NEVER happen during operation."),
+            _ = receiver_handle => error!("Receiver handle ended. This should NEVER happen during operation."),
+            _ = processor_handle => error!("Processor handle ended. This should NEVER happen during operation."),
         }
 
         sleep(Duration::from_secs(SECONDS_BEFORE_RECONNECTION)).await;

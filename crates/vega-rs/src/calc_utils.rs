@@ -5,14 +5,13 @@ use alloy::{
     sol,
 };
 use futures::future::join_all;
-use std::{
-    collections::HashMap,
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 use tokio::task;
+use tracing::warn;
 
 sol!(
     #[allow(missing_docs)]
+    #[allow(clippy::too_many_arguments)]
     #[sol(rpc)]
     AaveV3Pool,
     "src/abis/aave_v3_pool.json"
@@ -59,7 +58,7 @@ where
                         }
                         bucket_results.insert(address, data.healthFactor);
                     }
-                    Err(e) => eprintln!("Couldn't calculate address HF: {:?}", e),
+                    Err(e) => warn!("Couldn't calculate address HF: {:?}", e),
                 }
             }
             bucket_results

@@ -1,0 +1,1 @@
+On each health factor calculation, we store list of users and their health factor. The names of each file in this directory are the prefixes of the transactions that triggered the update (that is, they match with the price update bundle from oops-rs)

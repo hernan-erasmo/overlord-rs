@@ -15,4 +15,7 @@ futures-util = "0.3.31"
 hex = "0.4.3"
 overlord-shared-types = { git = "ssh://git@github.com/hernan-erasmo/overlord-shared-types.git" }
 tokio = { version = "1.41.1", features = ["full"]}
+tracing = "0.1"
+tracing-subscriber = {version = "0.3", features = ["local-time"]}
+tracing-appender = "0.2"
 zmq = "0.10.0"
