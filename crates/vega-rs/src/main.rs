@@ -21,6 +21,7 @@ use vega_rs::user_reserve_cache::UserReservesCache;
 const VEGA_INBOUND_ENDPOINT: &str = "ipc:///tmp/vega_inbound";
 const ADDRESSES_FILE_ENV: &str = "VEGA_ADDRESSES_FILE";
 const CHAINLINK_ADDRESSES_FILE_ENV: &str = "VEGA_CHAINLINK_ADDRESSES_FILE";
+const TEMP_OUTPUT_DIR: &str = "TEMP_OUTPUT_DIR";
 
 #[derive(Parser)]
 #[clap(
@@ -44,6 +45,7 @@ fn get_required_env_var(key: &str) -> Result<String, Box<dyn std::error::Error>>
 async fn run_price_update_pipeline(
     cache: &mut UserReservesCache,
     bundle: Option<&PriceUpdateBundle>,
+    output_data_dir: &str,
 ) {
     let pipeline_processing = Instant::now();
     let address_buckets = cache.get_candidates_for_bundle(bundle).await;
@@ -81,7 +83,17 @@ async fn run_price_update_pipeline(
         results.raw_results.len(),
         results.under_1_hf.len()
     );
-    let hf_traces_filepath = format!("crates/vega-rs/hf-traces/{}.txt", trace_id);
+    let hf_traces_dir = format!("{}/hf-traces", output_data_dir);
+    if !std::path::Path::new(output_data_dir).is_dir() {
+        error!("Output directory does not exist: {}", output_data_dir);
+        return;
+    }
+    std::fs::create_dir_all(&hf_traces_dir)
+        .map_err(|e| {
+            error!("Failed to create hf-traces directory: {}", e);
+        })
+        .ok();
+    let hf_traces_filepath = format!("{}/{}.txt", hf_traces_dir, trace_id);
     let hf_traces_file = match File::create(hf_traces_filepath.clone()) {
         Ok(file) => file,
         Err(e) => {
@@ -104,7 +116,10 @@ async fn run_price_update_pipeline(
     }
 }
 
-async fn _dump_initial_hf_results(user_buckets: Vec<Vec<Address>>) -> Result<(), Box<dyn Error>> {
+async fn _dump_initial_hf_results(
+    user_buckets: Vec<Vec<Address>>,
+    output_data_dir: &str,
+) -> Result<(), Box<dyn Error>> {
     let init_hf_results_timer = Instant::now();
     let ipc_url = "/tmp/reth.ipc";
     let ipc = IpcConnect::new(ipc_url.to_string());
@@ -118,9 +133,17 @@ async fn _dump_initial_hf_results(user_buckets: Vec<Vec<Address>>) -> Result<(),
     let init_hf_results =
         get_hf_for_users(user_buckets, &provider, None::<fn(Address, U256, U256)>).await;
     let init_hf_results_filepath = format!(
-        "init_hf_under_1_results_{}.txt",
+        "{}/init_hf_under_1_results_{}.txt",
+        output_data_dir,
         Local::now().format("%Y%m%d")
     );
+
+    // Check if directory exists
+    if !std::path::Path::new(output_data_dir).is_dir() {
+        error!("Output directory does not exist: {}", output_data_dir);
+        return Err("Output directory does not exist".into());
+    }
+
     let init_hf_results_file = match File::create(init_hf_results_filepath.clone()) {
         Ok(file) => file,
         Err(e) => {
@@ -176,9 +199,19 @@ async fn main() -> Result<(), String> {
             std::process::exit(1);
         }
     };
+    let temp_output_dir = match get_required_env_var(TEMP_OUTPUT_DIR) {
+        Ok(pathname) => pathname,
+        Err(e) => {
+            error!(
+                "Failed to get TEMP_OUTPUT_DIR path from environment variable: {}",
+                e
+            );
+            std::process::exit(1);
+        }
+    };
     let mut user_reserves_cache = UserReservesCache::new();
     let user_buckets = match user_reserves_cache
-        .initialize_cache(&addresses_file, &chainlink_addresses_file)
+        .initialize_cache(&addresses_file, &chainlink_addresses_file, &temp_output_dir)
         .await
     {
         Ok(buckets) => buckets,
@@ -188,7 +221,7 @@ async fn main() -> Result<(), String> {
         }
     };
 
-    if let Err(e) = _dump_initial_hf_results(user_buckets).await {
+    if let Err(e) = _dump_initial_hf_results(user_buckets, &temp_output_dir).await {
         error!("Failed to dump initial HF results: {:?}", e);
         std::process::exit(1);
     }
@@ -228,7 +261,12 @@ async fn main() -> Result<(), String> {
         };
         match deserialized_message {
             MessageBundle::PriceUpdate(price_update) => {
-                run_price_update_pipeline(&mut user_reserves_cache, Some(&price_update)).await;
+                run_price_update_pipeline(
+                    &mut user_reserves_cache,
+                    Some(&price_update),
+                    &temp_output_dir,
+                )
+                .await;
             }
             MessageBundle::WhistleblowerNotification(whistleblower_update) => {
                 info!(update_details = ?whistleblower_update, "Received whistleblower update");

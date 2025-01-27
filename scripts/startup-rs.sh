@@ -27,7 +27,7 @@ else
 fi
 
 # Check if --ignore-temp argument was provided
-if [[ " $* " =~ " --ignore-temp " ]]; then
+if [[ " $* " =~ " --ignore-temp-input " ]]; then
     echo "startup-rs.sh # Ignoring contents of TEMP_INPUT_DIR at $TEMP_INPUT_DIR and recreating it."
     rm -rf "$TEMP_INPUT_DIR"
     mkdir -p "$TEMP_INPUT_DIR"
@@ -38,6 +38,20 @@ else
         exit 1
     fi
     echo "startup-rs.sh # TEMP_INPUT_DIR directory already exists at $TEMP_INPUT_DIR, but is empty."
+fi
+
+# Check if --ignore-temp-output argument was provided
+if [[ " $* " =~ " --ignore-temp-output " ]]; then
+    echo "startup-rs.sh # Ignoring contents of TEMP_OUTPUT_DIR at $TEMP_OUTPUT_DIR and recreating it."
+    rm -rf "$TEMP_OUTPUT_DIR"
+    mkdir -p "$TEMP_OUTPUT_DIR"
+else
+    if [[ -d "$TEMP_OUTPUT_DIR" ]] && [[ "$(ls -A "$TEMP_OUTPUT_DIR" 2>/dev/null)" ]]; then
+        echo "startup-rs.sh # Warning: $TEMP_OUTPUT_DIR contains files that may be important."
+        echo "startup-rs.sh # Use --ignore-temp-output to clear the directory and continue."
+        exit 1
+    fi
+    echo "startup-rs.sh # TEMP_OUTPUT_DIR directory already exists at $TEMP_OUTPUT_DIR, but is empty."
 fi
 
 # Remove existing PID directory and create a new one
@@ -65,9 +79,11 @@ start_vega() {
     echo "startup-rs.sh # Attempting to start vega-rs with"
     echo "startup-rs.sh #    - VEGA_ADDRESSES_FILE=$VEGA_ADDRESSES_FILE"
     echo "startup-rs.sh #    - VEGA_CHAINLINK_ADDRESSES_FILE=$VEGA_CHAINLINK_ADDRESSES_FILE"
+    echo "startup-rs.sh #    - TEMP_OUTPUT_DIR=$TEMP_OUTPUT_DIR"
     setsid env \
         VEGA_ADDRESSES_FILE="$VEGA_ADDRESSES_FILE" \
         VEGA_CHAINLINK_ADDRESSES_FILE="$VEGA_CHAINLINK_ADDRESSES_FILE" \
+        TEMP_OUTPUT_DIR="$TEMP_OUTPUT_DIR" \
         "$VEGA_RS_BIN_PATH" > /dev/null 2>&1 &
     echo $! > "$PID_DIR/vega-rs.pid"
     echo "startup-rs.sh # Started $VEGA_RS_BIN_PATH with PID $(cat $PID_DIR/vega-rs.pid)"
