@@ -14,6 +14,8 @@
 # Get script directory regardless of how it's called
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 ENV_FILE="$SCRIPT_DIR/../.env"
+VENV_DIR="$SCRIPT_DIR/.venv"
+REQUIREMENTS_FILE="$SCRIPT_DIR/requirements.txt"
 
 # Load environment variables from .env file in parent directory
 if [ -f "$ENV_FILE" ]; then
@@ -59,6 +61,26 @@ echo "startup-rs.sh # Clearing $PID_DIR directory and creating a new one"
 rm -rf "$PID_DIR"
 mkdir -p "$PID_DIR"
 
+setup_venv() {
+    echo "Setting up virtual environment..."
+    python3 -m venv "$VENV_DIR"
+    source "$VENV_DIR/bin/activate"
+    pip install --upgrade pip
+}
+
+install_requirements() {
+    echo "Installing requirements..."
+    pip install -r "$REQUIREMENTS_FILE"
+}
+
+# Create venv if it doesn't exist
+if [ ! -d "$VENV_DIR" ]; then
+    setup_venv
+    install_requirements
+else
+    source "$VENV_DIR/bin/activate"
+fi
+
 start_vega() {
     local use_local_data=true
 
@@ -69,10 +91,11 @@ start_vega() {
 
     echo "startup-rs.sh # Running $SCRIPT_DIR/run_pmex.py with use-local-data=$use_local_data"
     VEGA_ADDRESSES_FILE=$(DATA_DIR="$DATA_DIR" python3 $SCRIPT_DIR/run_pmex.py --use-local-data="$use_local_data" | tee /dev/tty | tail -n1)
+    deactivate
 
     # Check if output is empty
-    if [ -z "$VEGA_ADDRESSES_FILE" ]; then
-        echo "startup-rs.sh # run_pmex.py returned empty output. Aborting startup." >&2
+    if ! [[ "$VEGA_ADDRESSES_FILE" =~ "addresses_" && "$VEGA_ADDRESSES_FILE" =~ \.txt$ ]]; then
+        echo "startup-rs.sh # seems run_pmex.py returned an error. Aborting startup." >&2
         exit 1
     fi
 

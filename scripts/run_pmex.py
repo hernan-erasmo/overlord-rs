@@ -1,15 +1,41 @@
 import argparse
-import sys
+import glob
 import os
+import sys
+
+from datetime import datetime
+
+
+BEGINNING_DATE = "2023_04"
+
+
+def run_pmex():
+    import requests
+
 
 def generate_addresses_file(data_dir: str) -> str:
     print("run_pmex.py # Generating addresses file", flush=True)
+    output_dir = f"{data_dir}/vega"
+    borrowers = f"{data_dir}/vega/borrowers"
 
-    # Generate addresses file here
+    # Find all raw files and collect addresses
+    addresses = set()
+    for filepath in glob.glob(f"{borrowers}/*_raw.txt"):
+        with open(filepath, 'r') as f:
+            addresses.update(line.strip() for line in f if line.strip())
 
-    timestamp = "20250124"
-    address_count = "77178"
-    return f"{data_dir}/vega/addresses_{timestamp}_{address_count}.txt"
+    # Generate output filename with timestamp and count
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    address_count = len(addresses)
+    output_file = f"{output_dir}/addresses_{timestamp}_{address_count}.txt"
+
+    # Write unique addresses to output file
+    with open(output_file, 'w') as f:
+        for address in sorted(addresses):
+            f.write(f"{address}\n")
+
+    print(f"run_pmex.py # Generated file with {address_count} addresses", flush=True)
+    return output_file
 
 def main():
     data_dir = os.getenv('DATA_DIR')
@@ -25,6 +51,7 @@ def main():
     
     try:
         args = parser.parse_args()
+        run_pmex()
         result = generate_addresses_file(data_dir)
         print(result, flush=True)
         return 0
