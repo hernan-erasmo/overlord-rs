@@ -125,7 +125,7 @@ start_app() {
 
 # Start applications and store their PIDs
 start_vega
-#start_app "$WHISTLEBLOWER_RS_BIN_PATH" "$PID_DIR/whistleblower-rs.pid"
-#start_app "$OOPS_RS_BIN_PATH" "$PID_DIR/oops-rs.pid"
+start_app "$WHISTLEBLOWER_RS_BIN_PATH" "$PID_DIR/whistleblower-rs.pid"
+start_app "$OOPS_RS_BIN_PATH" "$PID_DIR/oops-rs.pid"
 
 echo "startup-rs.sh # All applications started successfully"
