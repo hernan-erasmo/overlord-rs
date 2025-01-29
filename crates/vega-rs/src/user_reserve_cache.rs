@@ -240,6 +240,7 @@ impl UserReservesCache {
         &mut self,
         addresses_file: &str,
         chainlink_addresses_file: &str,
+        output_data_dir: &str,
     ) -> Result<Vec<Vec<UserAddress>>, Box<dyn Error>> {
         info!("Initializing UserReservesCache");
         // Step 0: Initialize stats
@@ -310,7 +311,8 @@ impl UserReservesCache {
         > = generate_user_by_position_by_asset(positions_by_user);
         self.user_reserves_cache = RwLock::new(user_by_position_by_asset);
 
-        self._collect_and_dump_cache_init_stats(&mut stats).await?;
+        self._collect_and_dump_cache_init_stats(&mut stats, output_data_dir)
+            .await?;
         info!(initialization_stats = ?stats, "Cache init complete");
         Ok(user_addresses_buckets)
     }
@@ -318,11 +320,19 @@ impl UserReservesCache {
     async fn _collect_and_dump_cache_init_stats(
         &mut self,
         stats: &mut UserReservesCacheInitStats,
+        output_data_dir: &str,
     ) -> Result<(), Box<dyn Error>> {
         let mut most_borrowed: (String, usize) = (String::new(), 0);
         let mut most_supplied: (String, usize) = (String::new(), 0);
         let timestamp = Local::now().format("%Y%m%d").to_string();
-        let init_output_file_path = format!("user_reserves_cache_{}.json", timestamp);
+        if !std::path::Path::new(output_data_dir).is_dir() {
+            return Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Output data directory '{}' does not exist", output_data_dir),
+            )));
+        }
+        let init_output_file_path =
+            format!("{}/user_reserves_cache_{}.json", output_data_dir, timestamp);
         let mut init_output_file = OpenOptions::new()
             .create(true)
             .write(true)
