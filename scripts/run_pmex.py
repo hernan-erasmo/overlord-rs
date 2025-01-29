@@ -138,12 +138,15 @@ def main():
     print(f"run_pmex.py # Running with DATA_DIR = {data_dir}", flush=True)
 
     parser = argparse.ArgumentParser(description='Process PMEX data')
-    parser.add_argument('--use-local-data', type=str, default='true',
-                       help='Whether to use local data (true/false)')
+    parser.add_argument('--force-pmex-update', type=str, default="false",
+                       help='If true, force running PMEX query on Dune (CONSUMES CREDITS)')
     
     try:
         args = parser.parse_args()
-        run_pmex(data_dir)
+        if args.force_pmex_update.lower() == "true":
+            run_pmex(data_dir)
+        else:
+            print("run_pmex.py # USING STALE DATA. Skipping PMEX query execution.", flush=True)
         result = generate_addresses_file(data_dir)
         print(result, flush=True)
         return 0

@@ -7,7 +7,8 @@
 # (unless you're debugging something or know what you're doing)
 #
 # Available args:
-# --ignore-temp: Clear the temporary input directory without prompting
+# --ignore-temp-input: Clear the temporary input directory without prompting
+# --ignore-temp-output: Clear the temporary output directory without prompting
 #
 ########################################################################
 
@@ -77,20 +78,19 @@ install_requirements() {
 if [ ! -d "$VENV_DIR" ]; then
     setup_venv
     install_requirements
-else
-    source "$VENV_DIR/bin/activate"
 fi
 
 start_vega() {
-    local use_local_data=true
+    local force_pmex_update=false
 
-    # Refactor this if options other than --use-local-data are required
-    if [ $# -gt 0 ]; then
-        use_local_data=false
+    # Check function arguments (not script arguments)
+    if [ $# -gt 0 ] && [ "$1" == "--force-pmex-update" ]; then
+        force_pmex_update=true
     fi
 
-    echo "startup-rs.sh # Running $SCRIPT_DIR/run_pmex.py with use-local-data=$use_local_data"
-    VEGA_ADDRESSES_FILE=$(DATA_DIR="$DATA_DIR" python3 $SCRIPT_DIR/run_pmex.py --use-local-data="$use_local_data" | tee /dev/tty | tail -n1)
+    source "$VENV_DIR/bin/activate"
+    echo "startup-rs.sh # Running $SCRIPT_DIR/run_pmex.py with force-pmex-update=$force_pmex_update"
+    VEGA_ADDRESSES_FILE=$(DATA_DIR="$DATA_DIR" python3 $SCRIPT_DIR/run_pmex.py --force-pmex-update="$force_pmex_update" | tee /dev/tty | tail -n1)
     deactivate
 
     # Check if output is empty
@@ -124,7 +124,13 @@ start_app() {
 }
 
 # Start applications and store their PIDs
-start_vega
+
+if [[ " $* " =~ " --force-pmex-update " ]]; then
+    start_vega "--force-pmex-update"
+else
+    start_vega
+fi
+
 start_app "$WHISTLEBLOWER_RS_BIN_PATH" "$PID_DIR/whistleblower-rs.pid"
 start_app "$OOPS_RS_BIN_PATH" "$PID_DIR/oops-rs.pid"
 
