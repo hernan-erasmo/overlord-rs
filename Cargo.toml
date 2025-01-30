@@ -3,7 +3,8 @@ resolver = "2"
 members = [
     "crates/vega-rs",
     "crates/oops-rs",
-    "crates/whistleblower-rs"
+    "crates/whistleblower-rs",
+    "crates/overlord-shared-types"
 ]
 
 [workspace.dependencies]
@@ -13,7 +14,7 @@ chrono = "0.4.38"
 ethers-core = "2.0.14"
 futures-util = "0.3.31"
 hex = "0.4.3"
-overlord-shared-types = { git = "ssh://git@github.com/hernan-erasmo/overlord-shared-types.git" }
+overlord-shared-types = { path = "crates/overlord-shared-types" }
 tokio = { version = "1.41.1", features = ["full"]}
 tracing = "0.1"
 tracing-subscriber = {version = "0.3", features = ["local-time"]}
