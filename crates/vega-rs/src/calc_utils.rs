@@ -52,6 +52,9 @@ where
                 match result {
                     Ok(data) => {
                         if data.healthFactor < U256::from(HF_MIN_THRESHOLD) {
+                            /*
+                            WRITE EVENT ON PROFITO IPC FILE HERE
+                            */
                             if let Some(cb) = &*alert_callback {
                                 cb(address, data.healthFactor, data.totalCollateralBase);
                             }

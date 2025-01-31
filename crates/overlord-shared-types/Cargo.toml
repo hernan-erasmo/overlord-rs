@@ -5,4 +5,4 @@ edition = "2021"
 
 [dependencies]
 alloy.workspace = true
-serde = "1.0.214"
+serde.workspace = true

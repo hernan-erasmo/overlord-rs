@@ -1,0 +1,15 @@
+[package]
+name = "profito-rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+alloy.workspace = true
+bincode.workspace = true
+tokio.workspace = true
+overlord-shared-types.workspace = true
+serde.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
+zmq.workspace = true
