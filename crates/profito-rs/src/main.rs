@@ -65,7 +65,7 @@ async fn main() {
                     }
                 }
                 Err(e) => {
-                    error!("Failed to receive ZMQ message: {e}");
+                    warn!("Failed to receive ZMQ message: {e}");
                     continue;
                 }
             }
