@@ -1,6 +1,4 @@
 use alloy::sol;
-use bincode;
-use serde;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 use tracing_appender::rolling::{self, Rotation};
