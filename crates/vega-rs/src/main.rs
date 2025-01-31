@@ -221,12 +221,14 @@ async fn main() -> Result<(), String> {
         }
     };
 
+    info!("Dumping initial HF results...");
     if let Err(e) = _dump_initial_hf_results(user_buckets, &temp_output_dir).await {
         error!("Failed to dump initial HF results: {:?}", e);
         std::process::exit(1);
     }
 
     // Create IPC file and start listening for price updates
+    info!("Setting up vega-rs ZMQ socket for inbound connections...");
     let context = zmq::Context::new();
     let inbound_socket = match context.socket(zmq::PULL) {
         Ok(socket) => socket,
