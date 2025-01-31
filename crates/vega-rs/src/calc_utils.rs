@@ -6,18 +6,59 @@ use alloy::{
 };
 use futures::future::join_all;
 use std::{collections::HashMap, sync::Arc};
-use tokio::task;
+use tokio::{
+    sync::mpsc,
+    task::{self, JoinHandle},
+};
 use tracing::warn;
 
 sol!(
     #[allow(missing_docs)]
     #[allow(clippy::too_many_arguments)]
+    #[derive(serde::Serialize)]
     #[sol(rpc)]
     AaveV3Pool,
     "src/abis/aave_v3_pool.json"
 );
 
 const HF_MIN_THRESHOLD: u128 = 1_000_000_000_000_000_000u128;
+
+// This number should be at least as big as the number of address buckets
+// passed to get_hf_for_users()
+const USER_ACCOUNT_DATA_WRITER_CHANNEL_SIZE: usize = 1000;
+const PROFITO_INBOUND_ENDPOINT: &str = "ipc:///tmp/profito_inbound";
+
+pub struct UserAccountDataWriter {
+    pub tx: mpsc::Sender<AaveV3Pool::getUserAccountDataReturn>,
+}
+
+impl UserAccountDataWriter {
+    pub fn new() -> (Self, JoinHandle<()>) {
+        let (tx, mut rx) = mpsc::channel(USER_ACCOUNT_DATA_WRITER_CHANNEL_SIZE);
+        let handle = tokio::spawn(async move {
+            let context = zmq::Context::new();
+            let socket = context.socket(zmq::PUSH).unwrap();
+            if let Err(e) = socket.connect(PROFITO_INBOUND_ENDPOINT) {
+                warn!("Failed to connect to profito-rs socket: {:?}", e);
+                return;
+            }
+            while let Some(data) = rx.recv().await {
+                if let Ok(bytes) = bincode::serialize(&data) {
+                    if let Err(e) = socket.send(&bytes, 0) {
+                        warn!("Failed to send user_account_data to profito-rs: {:?}", e);
+                    }
+                }
+            }
+        });
+        (Self { tx }, handle)
+    }
+
+    pub async fn send(&self, data: AaveV3Pool::getUserAccountDataReturn) {
+        if let Err(e) = self.tx.send(data).await {
+            warn!("Failed to send alert to UserAccountData writer: {:?}", e);
+        }
+    }
+}
 
 pub struct HealthFactorCalculationResults {
     pub raw_results: HashMap<Address, U256>,
@@ -35,6 +76,8 @@ pub async fn get_hf_for_users<F>(
 where
     F: Fn(Address, U256, U256) + Send + Sync + 'static,
 {
+    let (user_data_writer, user_data_writer_handle) = UserAccountDataWriter::new();
+    let user_data_writer = Arc::new(user_data_writer);
     let mut tasks = vec![];
     let pool = AaveV3Pool::new(
         address!("87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2"),
@@ -45,6 +88,7 @@ where
     for bucket in address_buckets {
         let pool = pool.clone();
         let alert_callback = alert_callback.clone();
+        let user_data_writer = user_data_writer.clone();
         let task = task::spawn(async move {
             let mut bucket_results = HashMap::new();
             for address in bucket {
@@ -52,9 +96,7 @@ where
                 match result {
                     Ok(data) => {
                         if data.healthFactor < U256::from(HF_MIN_THRESHOLD) {
-                            /*
-                            WRITE EVENT ON PROFITO IPC FILE HERE
-                            */
+                            user_data_writer.send(data.clone()).await;
                             if let Some(cb) = &*alert_callback {
                                 cb(address, data.healthFactor, data.totalCollateralBase);
                             }
@@ -73,6 +115,7 @@ where
         .into_iter()
         .filter_map(|r| r.ok())
         .collect();
+    let _ = user_data_writer_handle.await;
     let mut raw_results = HashMap::new();
     let mut under_1_hf = HashMap::new();
     for bucket_results in bucket_aggregate_results {

@@ -1,7 +1,6 @@
 use alloy::primitives::{Address, Bytes, U256};
 use serde::{Deserialize, Serialize};
 
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PriceUpdateBundle {
     pub trace_id: String,
@@ -28,7 +27,7 @@ pub struct WhistleblowerEventDetails {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct WhistleblowerUpdate {
-    pub trace_id: String,  // First few chars of tx hash
+    pub trace_id: String, // First few chars of tx hash
     pub block_number: u64,
     pub event_details: WhistleblowerEventDetails,
 }

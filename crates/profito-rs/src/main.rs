@@ -12,16 +12,18 @@ const CHANNEL_CAPACITY: usize = 1000;
 sol!(
     #[allow(missing_docs)]
     #[allow(clippy::too_many_arguments)]
-    #[derive(serde::Deserialize)]
-    #[derive(Debug)]
+    #[derive(serde::Deserialize, Debug)]
     #[sol(rpc)]
     AaveV3Pool,
     "src/abis/aave_v3_pool.json"
 );
 
 fn _setup_logging() {
-    let log_file =
-        rolling::RollingFileAppender::new(Rotation::DAILY, "/var/log/overlord-rs", "profito-rs.log");
+    let log_file = rolling::RollingFileAppender::new(
+        Rotation::DAILY,
+        "/var/log/overlord-rs",
+        "profito-rs.log",
+    );
     let file_writer = BoxMakeWriter::new(log_file);
     tracing_subscriber::fmt()
         .with_writer(file_writer)
@@ -34,7 +36,8 @@ fn _setup_logging() {
 async fn main() {
     _setup_logging();
 
-    let (tx_buffer, mut rx_buffer) = mpsc::channel::<AaveV3Pool::getUserAccountDataReturn>(CHANNEL_CAPACITY);
+    let (tx_buffer, mut rx_buffer) =
+        mpsc::channel::<AaveV3Pool::getUserAccountDataReturn>(CHANNEL_CAPACITY);
 
     let receiver_handle = tokio::spawn(async move {
         let context = zmq::Context::new();
@@ -43,7 +46,10 @@ async fn main() {
             error!("Failed to bind ZMQ socket: {e}");
             return;
         }
-        info!("Listening for health factor alerts on {}", PROFITO_INBOUND_ENDPOINT);
+        info!(
+            "Listening for health factor alerts on {}",
+            PROFITO_INBOUND_ENDPOINT
+        );
         loop {
             match socket.recv_bytes(0) {
                 Ok(bytes) => {
@@ -53,13 +59,13 @@ async fn main() {
                                 warn!("Failed to send alert to buffer: {e}");
                                 break;
                             }
-                        },
+                        }
                         Err(e) => {
                             warn!("Failed to deserialize message: {e}");
                             continue;
                         }
                     }
-                },
+                }
                 Err(e) => {
                     error!("Failed to receive ZMQ message: {e}");
                     continue;
