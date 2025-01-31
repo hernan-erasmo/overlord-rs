@@ -10,7 +10,7 @@ use tokio::{
     sync::mpsc,
     task::{self, JoinHandle},
 };
-use tracing::warn;
+use tracing::{info, warn};
 
 sol!(
     #[allow(missing_docs)]
@@ -34,6 +34,7 @@ pub struct UserAccountDataWriter {
 
 impl UserAccountDataWriter {
     pub fn new() -> (Self, JoinHandle<()>) {
+        info!("Setting up UserAccountData writer");
         let (tx, mut rx) = mpsc::channel(USER_ACCOUNT_DATA_WRITER_CHANNEL_SIZE);
         let handle = tokio::spawn(async move {
             let context = zmq::Context::new();
@@ -49,6 +50,8 @@ impl UserAccountDataWriter {
                     }
                 }
             }
+
+            socket.disconnect(PROFITO_INBOUND_ENDPOINT).ok();
         });
         (Self { tx }, handle)
     }
@@ -76,6 +79,7 @@ pub async fn get_hf_for_users<F>(
 where
     F: Fn(Address, U256, U256) + Send + Sync + 'static,
 {
+    info!("Calculating health factor for users");
     let (user_data_writer, user_data_writer_handle) = UserAccountDataWriter::new();
     let user_data_writer = Arc::new(user_data_writer);
     let mut tasks = vec![];
@@ -115,6 +119,7 @@ where
         .into_iter()
         .filter_map(|r| r.ok())
         .collect();
+    drop(user_data_writer);
     let _ = user_data_writer_handle.await;
     let mut raw_results = HashMap::new();
     let mut under_1_hf = HashMap::new();

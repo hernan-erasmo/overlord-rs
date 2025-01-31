@@ -55,7 +55,7 @@ async fn main() {
                         Ok(user_account_data) => {
                             if let Err(e) = tx_buffer.send(user_account_data).await {
                                 warn!("Failed to send alert to buffer: {e}");
-                                break;
+                                continue;
                             }
                         }
                         Err(e) => {
