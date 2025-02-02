@@ -56,14 +56,12 @@ pub struct HealthFactorCalculationResults {
 /// Given a array of user address buckets and a provider, query the AAVE v3's Pool contract
 /// and return a structure with the HF of all addresses, as well as a separate attribute with
 /// only underwater users
-pub async fn get_hf_for_users<F>(
+pub async fn get_hf_for_users(
     address_buckets: Vec<Vec<Address>>,
     provider: &RootProvider<PubSubFrontend>,
     trace_id: Option<String>,
     event_bus: Option<Arc<UnderwaterUserEventBus>>,
 ) -> HealthFactorCalculationResults
-where
-    F: Fn(Address, U256, U256) + Send + Sync + 'static,
 {
     let mut tasks = vec![];
     let pool = Arc::new(AaveV3Pool::new(
