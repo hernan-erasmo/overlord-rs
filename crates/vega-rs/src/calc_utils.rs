@@ -6,7 +6,10 @@ use alloy::{
 };
 use futures::future::join_all;
 use std::{collections::HashMap, sync::Arc};
-use tokio::task;
+use tokio::{
+    sync::broadcast,
+    task
+};
 use tracing::warn;
 
 sol!(
@@ -18,6 +21,31 @@ sol!(
 );
 
 const HF_MIN_THRESHOLD: u128 = 1_000_000_000_000_000_000u128;
+
+#[derive(Clone)]
+pub struct UnderwaterUserEvent {
+    pub address: Address,
+    pub user_account_data: AaveV3Pool::getUserAccountDataReturn,
+}
+
+pub struct UnderwaterUserEventBus {
+    sender: broadcast::Sender<UnderwaterUserEvent>,
+}
+
+impl UnderwaterUserEventBus {
+    pub fn new(capacity: usize) -> Self {
+        let (sender, _) = broadcast::channel(capacity);
+        Self { sender }
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<UnderwaterUserEvent> {
+        self.sender.subscribe()
+    }
+
+    pub fn send(&self, event: UnderwaterUserEvent) {
+        let _ = self.sender.send(event);
+    }
+}
 
 pub struct HealthFactorCalculationResults {
     pub raw_results: HashMap<Address, U256>,
