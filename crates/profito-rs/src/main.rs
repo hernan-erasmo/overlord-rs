@@ -1,20 +1,9 @@
-use alloy::sol;
-use tokio::sync::mpsc;
+use overlord_shared_types::UnderwaterUserEvent;
 use tracing::{error, info, warn};
 use tracing_appender::rolling::{self, Rotation};
 use tracing_subscriber::fmt::{time::LocalTime, writer::BoxMakeWriter};
 
 const PROFITO_INBOUND_ENDPOINT: &str = "ipc:///tmp/profito_inbound";
-const CHANNEL_CAPACITY: usize = 1000;
-
-sol!(
-    #[allow(missing_docs)]
-    #[allow(clippy::too_many_arguments)]
-    #[derive(serde::Deserialize, Debug)]
-    #[sol(rpc)]
-    AaveV3Pool,
-    "src/abis/aave_v3_pool.json"
-);
 
 fn _setup_logging() {
     let log_file = rolling::RollingFileAppender::new(
@@ -34,10 +23,8 @@ fn _setup_logging() {
 async fn main() {
     _setup_logging();
 
-    let (tx_buffer, mut rx_buffer) =
-        mpsc::channel::<AaveV3Pool::getUserAccountDataReturn>(CHANNEL_CAPACITY);
-
-    let receive_from_vega_handle = tokio::spawn(async move {
+    loop { // Outer loop handles reconnection
+        info!("Starting Profito RS (outer loop)");
         let context = zmq::Context::new();
         let socket = context.socket(zmq::PULL).unwrap();
         if let Err(e) = socket.bind(PROFITO_INBOUND_ENDPOINT) {
@@ -48,15 +35,14 @@ async fn main() {
             "Listening for health factor alerts on {}",
             PROFITO_INBOUND_ENDPOINT
         );
-        loop {
+        loop { // Inner loop handles recv
             match socket.recv_bytes(0) {
                 Ok(bytes) => {
-                    match bincode::deserialize::<AaveV3Pool::getUserAccountDataReturn>(&bytes) {
-                        Ok(user_account_data) => {
-                            if let Err(e) = tx_buffer.send(user_account_data).await {
-                                warn!("Failed to send alert to buffer: {e}");
-                                continue;
-                            }
+                    match bincode::deserialize::<UnderwaterUserEvent>(&bytes) {
+                        Ok(uw_event) => {
+                            tokio::spawn(async move {
+                                info!("processing candidate | {} | {} | {} |", uw_event.trace_id, uw_event.address, uw_event.user_account_data.totalCollateralBase);
+                            });
                         }
                         Err(e) => {
                             warn!("Failed to deserialize message: {e}");
@@ -70,17 +56,5 @@ async fn main() {
                 }
             }
         }
-    });
-
-    let process_user_data_handler = tokio::spawn(async move {
-        info!("Starting processor handler");
-        while let Some(user_account_data) = rx_buffer.recv().await {
-            info!("processing message from vega-rs: {:?}", user_account_data);
-        }
-    });
-
-    tokio::select! {
-        _ = receive_from_vega_handle => error!("Receiver handle ended unexpectedly"),
-        _ = process_user_data_handler => error!("Processor handle ended unexpectedly"),
     }
 }
