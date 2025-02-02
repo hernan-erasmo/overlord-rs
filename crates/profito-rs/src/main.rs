@@ -37,7 +37,7 @@ async fn main() {
     let (tx_buffer, mut rx_buffer) =
         mpsc::channel::<AaveV3Pool::getUserAccountDataReturn>(CHANNEL_CAPACITY);
 
-    let receiver_handle = tokio::spawn(async move {
+    let receive_from_vega_handle = tokio::spawn(async move {
         let context = zmq::Context::new();
         let socket = context.socket(zmq::PULL).unwrap();
         if let Err(e) = socket.bind(PROFITO_INBOUND_ENDPOINT) {
@@ -71,13 +71,16 @@ async fn main() {
             }
         }
     });
-    let processor_handle = tokio::spawn(async move {
+
+    let process_user_data_handler = tokio::spawn(async move {
+        info!("Starting processor handler");
         while let Some(user_account_data) = rx_buffer.recv().await {
             info!("processing message from vega-rs: {:?}", user_account_data);
         }
     });
+
     tokio::select! {
-        _ = receiver_handle => error!("Receiver handle ended unexpectedly"),
-        _ = processor_handle => error!("Processor handle ended unexpectedly"),
+        _ = receive_from_vega_handle => error!("Receiver handle ended unexpectedly"),
+        _ = process_user_data_handler => error!("Processor handle ended unexpectedly"),
     }
 }
