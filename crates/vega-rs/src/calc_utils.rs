@@ -25,6 +25,7 @@ const HF_MIN_THRESHOLD: u128 = 1_000_000_000_000_000_000u128;
 #[derive(Clone)]
 pub struct UnderwaterUserEvent {
     pub address: Address,
+    pub trace_id: String,
     pub user_account_data: AaveV3Pool::getUserAccountDataReturn,
 }
 
@@ -58,21 +59,22 @@ pub struct HealthFactorCalculationResults {
 pub async fn get_hf_for_users<F>(
     address_buckets: Vec<Vec<Address>>,
     provider: &RootProvider<PubSubFrontend>,
-    alert_callback: Option<F>,
+    trace_id: Option<String>,
+    event_bus: Option<Arc<UnderwaterUserEventBus>>,
 ) -> HealthFactorCalculationResults
 where
     F: Fn(Address, U256, U256) + Send + Sync + 'static,
 {
     let mut tasks = vec![];
-    let pool = AaveV3Pool::new(
+    let pool = Arc::new(AaveV3Pool::new(
         address!("87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2"),
         provider.clone(),
-    );
-    let pool = Arc::new(pool);
-    let alert_callback = Arc::new(alert_callback);
+    ));
+    let trace_id = trace_id.clone();
     for bucket in address_buckets {
         let pool = pool.clone();
-        let alert_callback = alert_callback.clone();
+        let event_bus = event_bus.clone();
+        let trace_id = trace_id.as_ref().map(String::from).unwrap_or_else(|| String::from("initial-run"));
         let task = task::spawn(async move {
             let mut bucket_results = HashMap::new();
             for address in bucket {
@@ -80,8 +82,12 @@ where
                 match result {
                     Ok(data) => {
                         if data.healthFactor < U256::from(HF_MIN_THRESHOLD) {
-                            if let Some(cb) = &*alert_callback {
-                                cb(address, data.healthFactor, data.totalCollateralBase);
+                            if let Some(bus) = &event_bus {
+                                bus.send(UnderwaterUserEvent {
+                                    address,
+                                    trace_id: trace_id.clone(),
+                                    user_account_data: data.clone(),
+                                });
                             }
                         }
                         bucket_results.insert(address, data.healthFactor);
