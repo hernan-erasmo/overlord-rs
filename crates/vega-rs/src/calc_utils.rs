@@ -2,9 +2,12 @@ use alloy::{
     primitives::{address, Address, U256},
     providers::RootProvider,
     pubsub::PubSubFrontend,
-    sol,
 };
 use futures::future::join_all;
+use overlord_shared_types::{
+    AaveV3Pool,
+    UnderwaterUserEvent
+};
 use std::{collections::HashMap, sync::Arc};
 use tokio::{
     sync::broadcast,
@@ -12,23 +15,7 @@ use tokio::{
 };
 use tracing::warn;
 
-sol!(
-    #[allow(missing_docs)]
-    #[allow(clippy::too_many_arguments)]
-    #[derive(serde::Serialize)]
-    #[sol(rpc)]
-    AaveV3Pool,
-    "src/abis/aave_v3_pool.json"
-);
-
 const HF_MIN_THRESHOLD: u128 = 1_000_000_000_000_000_000u128;
-
-#[derive(Clone)]
-pub struct UnderwaterUserEvent {
-    pub address: Address,
-    pub trace_id: String,
-    pub user_account_data: AaveV3Pool::getUserAccountDataReturn,
-}
 
 pub struct UnderwaterUserEventBus {
     sender: broadcast::Sender<UnderwaterUserEvent>,
