@@ -6,25 +6,25 @@ Given an underwater user alert (that is, HF < 1), `profito-rs` aims to answer th
 
 The most basic sanity check we can make is net profitability, which is composed of 3 parts
 
-$Net\ Profit = Liquidation\ Bonus - Deterministic\ Costs - Non$-$deterministic\ Costs$
+$NetProfit = LiquidationBonus - DeterministicCosts - NonDeterministicCosts$
 
 ### Liquidation Bonus
 
 `Liquidation Bonus` is what _adds_ to the equation.
 
-$Liquidation\ Bonus = Debt\ Repaid × Bonus\ Multiplier − Debt\ Repaid$
+$LiquidationBonus = DebtRepaid × BonusMultiplier − DebtRepaid$
 
 ### Deterministic Costs
 
 `Deterministic Costs` are the ones we either know for sure how much they're going to eat into our profits, or that we can at least bound somehow.
 
-$Deterministic\ Costs = (Gas\ Used × Base\ Fee) + (Debt\ Repaid × Flash\ Loan\ Rate) + (Collateral\ Received × Slippage\ Rate)$
+$DeterministicCosts = (GasUsed × BaseFee) + (DebtRepaid × FlashLoanRate) + (CollateralReceived × SlippageRate)$
 
-### Non-deterministic Costs
+### NonDeterministic Costs
 
-`Non-deterministic costs` are the ones that we can't easily predict, or that we can't easily know how much we're going to need to make our TX land.
+`NonDeterministic costs` are the ones that we can't easily predict, or that we can't easily know how much we're going to need to make our TX land.
 
-$Non$-$deterministic\ Costs$ = $(Gas\ Used × Priority\ Fee)+ Coinbase\ Bribe − Refunded\ ETH$
+$NonDeterministicCosts$ = $(GasUsed × PriorityFee)+ CoinbaseBribe − RefundedETH$
 
 ## Open questions
 
