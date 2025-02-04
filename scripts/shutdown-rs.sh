@@ -27,7 +27,7 @@ else
 fi
 
 # Valid app names
-VALID_APPS=("vega-rs" "oops-rs" "whistleblower-rs")
+VALID_APPS=("vega-rs" "oops-rs" "whistleblower-rs" "profito-rs")
 
 # Function to validate process name
 validate_process() {
@@ -37,7 +37,7 @@ validate_process() {
     
     for app in "${VALID_APPS[@]}"; do
         if [ "$proc_name" = "$app" ]; then
-            echo "shutdown-rs.sh # About to shutdown $proc_name"
+            echo "shutdown-rs.sh # About to shutdown $proc_name with PID $pid"
             return 0
         fi
     done
@@ -51,7 +51,6 @@ stop_app() {
         local pid=$(cat "$pid_file")
         if validate_process "$pid"; then
             if kill -0 "$pid" 2>/dev/null; then
-                echo "shutdown-rs.sh # Stopping process with PID: $pid"
                 kill "$pid"
                 # Wait for process to terminate
                 for i in {1..3}; do

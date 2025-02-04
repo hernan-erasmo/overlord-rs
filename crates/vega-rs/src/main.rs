@@ -20,6 +20,7 @@ use vega_rs::fork_provider::ForkProvider;
 use vega_rs::user_reserve_cache::UserReservesCache;
 
 const VEGA_INBOUND_ENDPOINT: &str = "ipc:///tmp/vega_inbound";
+const PROFITO_INBOUND_ENDPOINT: &str = "ipc:///tmp/profito_inbound";
 const ADDRESSES_FILE_ENV: &str = "VEGA_ADDRESSES_FILE";
 const CHAINLINK_ADDRESSES_FILE_ENV: &str = "VEGA_CHAINLINK_ADDRESSES_FILE";
 const TEMP_OUTPUT_DIR: &str = "TEMP_OUTPUT_DIR";
@@ -228,6 +229,22 @@ async fn main() -> Result<(), String> {
             );
         }
     });
+    let mut profito_subscriber = uw_event_bus.subscribe();
+    tokio::spawn(async move {
+        let context = zmq::Context::new();
+        let profito_socket = context.socket(zmq::PUSH).unwrap();
+        if let Err(e) = profito_socket.connect(PROFITO_INBOUND_ENDPOINT) {
+            error!("Failed to connect to profito-rs: {}", e);
+            return;
+        }
+        while let Ok(event) = profito_subscriber.recv().await {
+            if let Ok(bytes) = bincode::serialize(&event) {
+                if let Err(e) = profito_socket.send(&bytes, 0) {
+                    error!("Failed to send message to profito-rs: {}", e);
+                }
+            }
+        }
+    });
 
     if let Err(e) = _dump_initial_hf_results(user_buckets, &temp_output_dir, uw_event_bus.clone()).await {
         error!("Failed to dump initial HF results: {:?}", e);
@@ -235,6 +252,7 @@ async fn main() -> Result<(), String> {
     }
 
     // Create IPC file and start listening for price updates
+    info!("Setting up vega-rs ZMQ socket for inbound connections...");
     let context = zmq::Context::new();
     let inbound_socket = match context.socket(zmq::PULL) {
         Ok(socket) => socket,
