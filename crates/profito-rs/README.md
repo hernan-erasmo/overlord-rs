@@ -28,6 +28,15 @@ $NonDeterministicCosts$ = $(GasUsed × PriorityFee)+ CoinbaseBribe − RefundedE
 
 ## Open questions
 
-1. How do we determine which debt to repay when liquidating?
-2. Why would we ever want to ask for a refund ETH amount? (only saw this on beaver, btw)
-3. What exactly is `slippage rate`? Do we even need to account for it?
+### 1. How do we determine which debt to repay when liquidating?
+TBA
+
+### 2. Why would we ever want to ask for a refund ETH amount? (only saw this on beaver, btw)
+TBA
+
+### 3. What exactly is `slippage rate`? Do we even need to account for it?
+TBA
+
+### 4. If `CLOSE_FACTOR_HF_THRESHOLD` < HF < 1, then only 50% of the debt can be liquidated. If HF < `CLOSE_FACTOR_HF_THRESHOLD`, then 100% of the debt can be liquidated. Is `CLOSE_FACTOR_HF_THRESHOLD` an attribute of the reserve?
+
+No, `CLOSE_FACTOR_HF_THRESHOLD` is hardcoded into the [LiquidationLogic](https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/logic/LiquidationLogic.sol#L68C27-L68C63) contract, and it's defined as 0.95e18. If the HF is below 1, but above that, then only 50% can be liquidated. If it's under that value, then you can liquidate 100% of whatever debt you choose.
