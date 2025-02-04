@@ -14,17 +14,32 @@ $NetProfit = LiquidationBonus - DeterministicCosts - NonDeterministicCosts$
 
 $LiquidationBonus = DebtRepaid × BonusMultiplier − DebtRepaid$
 
+- $BonusMultiplier$ is the value of the `liquidation bonus` column of [config.fyi chart](https://www.config.fyi/)
+- In order to calculate the value of $DebtRepaid$, there are two questions that must be answered first: _which_ reserve do we want to liquidate, and how much of that reserve _can_ we liquidate. The later is determined by the relationship between `HF` and `CLOSE_FACTOR_HF_THRESHOLD`, the former by iterating over all reserves the user has as collateral.
+
+These values can be calculated from Rust land.
+
 ### Deterministic Costs
 
 `Deterministic Costs` are the ones we either know for sure how much they're going to eat into our profits, or that we can at least bound somehow.
 
-$DeterministicCosts = (GasUsed × BaseFee) + (DebtRepaid × FlashLoanRate) + (CollateralReceived × SlippageRate)$
+$DeterministicCosts = GasUsed × (BaseFee + PriorityFee) + (DebtRepaid × FlashLoanRate) + (CollateralToReceive × SlippageRate)$
+
+- $GasUsed$ can be calculated using `eth_estimateGas`
+- $BaseFee$ can be calculated using `eth_gasPrice`. When implementing this, refer to [Calculating the Max Fee](https://www.blocknative.com/blog/eip-1559-fees#3) section of that article (which is linked from the official Ethereum docs)
+- $DebtRepaid$ is already calculated above
+- $FlashLoanRate$ is determined by [FLASHLOAN_PREMIUM_TOTAL](https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/interfaces/IPool.sol#L690). According to [Aave docs](https://aave.com/docs/developers/flash-loans#overview-flash-loan-fee), it's initialized at 0.05% of whatever asset amount you're flash-loaning, but you should query the `Pool` contract to get this value, just in case.
+- $CollateralToReceive$ is the amount of collateral you'd receive if the liquidation is executed.
+- $SlippageRate$ is a percentage of the $CollateralToReceive$ that you lose when converting back from the awarded collateral back to the base asset.
 
 ### NonDeterministic Costs
 
 `NonDeterministic costs` are the ones that we can't easily predict, or that we can't easily know how much we're going to need to make our TX land.
 
-$NonDeterministicCosts$ = $(GasUsed × PriorityFee)+ CoinbaseBribe − RefundedETH$
+$NonDeterministicCosts = CoinbaseBribe − RefundedETH$
+
+$CoinbaseBribe$ is a value on top of the $PriorityFee$ that goes straight to the builder's _Coinbase_ wallet.
+$RefundedETH$ is the amount you can get refunded if you didn't end up using all the gas fees. According to beaverbuild docs, it negatively impacts the prioritization of your TX.
 
 ## Open questions
 
@@ -35,7 +50,7 @@ TBA
 TBA
 
 ### 3. What exactly is `slippage rate`? Do we even need to account for it?
-TBA
+$SlippageRate$ is already described above, and it's required because you need to account for the full round trip of the asset. Meaning that if you start with ETH, for example, and use it to liquidate a position for which you might get a different asset as reward, you need to conver that asset back to ETH in order to settle that profit (or loss). You can always keep the reward asset, but you expose yourself to fluctuations on it's price.
 
 ### 4. If `CLOSE_FACTOR_HF_THRESHOLD` < HF < 1, then only 50% of the debt can be liquidated. If HF < `CLOSE_FACTOR_HF_THRESHOLD`, then 100% of the debt can be liquidated. Is `CLOSE_FACTOR_HF_THRESHOLD` an attribute of the reserve?
 
