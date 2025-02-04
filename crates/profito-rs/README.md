@@ -14,7 +14,7 @@ $NetProfit = LiquidationBonus - DeterministicCosts - NonDeterministicCosts$
 
 $LiquidationBonus = DebtRepaid × BonusMultiplier − DebtRepaid$
 
-- $BonusMultiplier$ is the value of the `liquidation bonus` column of [config.fyi chart](https://www.config.fyi/)
+- $BonusMultiplier$ is the value of the `liquidation bonus` column of [config.fyi chart](https://www.config.fyi/) (which can be queried from the `AaveProtocolDataProvider` contract using [getReserveConfigurationData](https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/misc/AaveProtocolDataProvider.sol#L77))
 - In order to calculate the value of $DebtRepaid$, there are two questions that must be answered first: _which_ reserve do we want to liquidate, and how much of that reserve _can_ we liquidate. The later is determined by the relationship between `HF` and `CLOSE_FACTOR_HF_THRESHOLD`, the former by iterating over all reserves the user has as collateral.
 
 These values can be calculated from Rust land.
@@ -43,8 +43,16 @@ $RefundedETH$ is the amount you can get refunded if you didn't end up using all 
 
 ## Open questions
 
-### 1. How do we determine which debt to repay when liquidating?
-TBA
+### 1. How do we determine which debt/collateral pair to pass to the `liquidationCall()` function?
+_Assuming_ (I'm 99,9% sure, but not 100% sure) that values for each [UserReserveData](https://github.com/aave-dao/aave-v3-origin/blob/ae2d19f998b421b381b85a62d79ecffbb0701501/src/contracts/helpers/interfaces/IUiPoolDataProviderV3.sol#L57-L62) element returned by [getUserReservesData()](https://github.com/aave-dao/aave-v3-origin/blob/main/src/contracts/helpers/UiPoolDataProviderV3.sol#L220C12-L220C31) are denominated in ETH, then the calculations are:
+
+$RawCollateralReceived = DebtRepaid × BonusMultiplier$
+
+$FinalCollateralReceived = RawCollateralReceived × (1 - slippage)$
+
+$NetProfit = FinalCollateralReceived - DebtRepaid - GasCost$
+
+
 
 ### 2. Why would we ever want to ask for a refund ETH amount? (only saw this on beaver, btw)
 TBA
