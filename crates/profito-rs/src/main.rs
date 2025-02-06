@@ -42,6 +42,12 @@ pub struct ProviderCache {
     initialization: Arc<Mutex<()>>,
 }
 
+impl Default for ProviderCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ProviderCache {
     pub fn new() -> Self {
         Self {
