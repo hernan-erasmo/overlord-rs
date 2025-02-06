@@ -6,11 +6,11 @@ use bincode::deserialize;
 use chrono::Local;
 use clap::Parser;
 use overlord_shared_types::{MessageBundle, PriceUpdateBundle};
-use std::sync::Arc;
 use std::env;
 use std::error::Error;
 use std::fs::File;
 use std::io::Write;
+use std::sync::Arc;
 use tokio::time::Instant;
 use tracing::{error, info, warn};
 use tracing_appender::rolling::{self, Rotation};
@@ -128,8 +128,7 @@ async fn _dump_initial_hf_results(
             return Err(Box::new(e));
         }
     };
-    let init_hf_results =
-        get_hf_for_users(user_buckets, &provider, None, Some(event_bus)).await;
+    let init_hf_results = get_hf_for_users(user_buckets, &provider, None, Some(event_bus)).await;
     let init_hf_results_filepath = format!(
         "{}/init_hf_under_1_results_{}.txt",
         output_data_dir,
@@ -225,7 +224,10 @@ async fn main() -> Result<(), String> {
         while let Ok(event) = uw_log_subscriber.recv().await {
             info!(
                 "ALERT (from event bus) | {} | {} has HF < 1: {} (total collateral {})",
-                event.trace_id, event.address, event.user_account_data.healthFactor, event.user_account_data.totalCollateralBase
+                event.trace_id,
+                event.address,
+                event.user_account_data.healthFactor,
+                event.user_account_data.totalCollateralBase
             );
         }
     });
@@ -246,7 +248,9 @@ async fn main() -> Result<(), String> {
         }
     });
 
-    if let Err(e) = _dump_initial_hf_results(user_buckets, &temp_output_dir, uw_event_bus.clone()).await {
+    if let Err(e) =
+        _dump_initial_hf_results(user_buckets, &temp_output_dir, uw_event_bus.clone()).await
+    {
         error!("Failed to dump initial HF results: {:?}", e);
         std::process::exit(1);
     }
