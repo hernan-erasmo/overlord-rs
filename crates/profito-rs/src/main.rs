@@ -61,7 +61,6 @@ impl ProviderCache {
         if let Some(provider) = PROVIDER.get() {
             return Ok(provider.clone());
         }
-
         let _lock = self.initialization.lock().await;
 
         if let Some(provider) = PROVIDER.get() {
@@ -89,51 +88,48 @@ struct DebtCollateralPairInfo {
     liquidation_profit: U256,
 }
 
-/*
-symbol;liqBonus;underlyingAsset
-WETH;5%;0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2
-wstETH;6%;0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0
-WBTC;5%;0x2260fac5e5542a773aa44fbcfedf7c193bc2c599
-USDC;4.5%;0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48
-DAI;5%;0x6b175474e89094c44da98b954eedeac495271d0f
-LINK;7%;0x514910771af9ca656af840dff83e8264ecf986ca
-AAVE;7.5%;0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9
-cbETH;7.5%;0xbe9895146f7af43049ca1c1ae358b0541ea49704
-USDT;4.5%;0xdac17f958d2ee523a2206206994597c13d831ec7
-rETH;7.5%;0xae78736cd615f374d3085123a210448e74fc6393
-LUSD;4.5%;0x5f98805a4e8be255a32880fdec7f6728c6568ba0
-CRV;8.3%;0xd533a949740bb3306d119cc777fa900ba034cd52
-MKR;8.5%;0x9f8f72aa9304c8b593d555f12ef6589cc3a579a2
-SNX;8.5%;0xc011a73ee8576fb46f5e1c5751ca3b9fe0af2a6f
-BAL;8.3%;0xba100000625a3754423978a60c9317c58a424e3d
-UNI;0%;0x1f9840a85d5af5bf1d1762f925bdaddc4201f984
-LDO;9%;0x5a98fcbea516cf06857215779fd812ca3bef1b32
-ENS;8%;0xc18360217d8f7ab5e7c516566761ea12ce7f9d72
-1INCH;7.5%;0x111111111117dc0aa78b770fa6a738034120c302
-FRAX;6%;0x853d955acef822db058eb8505911ed77f175b99e
-GHO;0%;0x40d16fc0246ad3160ccc09b8d0d3a2cd28ae6c2f
-RPL;0%;0xd33526068d116ce69f19a9ee46f0bd304f21a51f
-sDAI;4.5%;0x83f20f44975d03b1b09e64809b757c47f942beea
-STG;0%;0xaf5191b0de278c7286d6c7cc6ab6bb8a73ba2cd6
-KNC;0%;0xdefa4e8a7bcba345f687a2f1456f5edd9ce97202
-FXS;0%;0x3432b6a60d23ca0dfca7761b7ab56459d9c964d0
-crvUSD;0%;0xf939e0a03fb07f59a73314e73794be0e57ac1b4e
-PYUSD;7.5%;0x6c3ea9036406852006290770bedfcaba0e23a0e8
-weETH;7%;0xcd5fe23c85820f7b72d0926fc9b05b43e359b7ee
-osETH;7.5%;0xf1c9acdc66974dfb6decb12aa385b9cd01190e38
-USDe;8.5%;0x4c9edd5852cd905f086c759e8383e09bff1e68b3
-ETHx;7.5%;0xa35b1b31ce002fbf2058d22f30f95d405200a15b
-sUSDe;8.5%;0x9d39a5de30e57443bff2a8307a4256c8797a3497
-tBTC;7.5%;0x18084fba666a33d37592fa2633fd49a74dd93a88
-cbBTC;7.5%;0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf
-USDS;7.5%;0xdc035d45d973e3ec169d2276ddab16f1e407384f
-rsETH;7.5%;0xa1290d69c65a6fe4df752f95823fae25cb99e5a7
-LBTC;8.5%;0x8236a87084f8b84306f72007f36f2618a5634494
-*/
-fn get_best_debt_collateral_pair(
-    user_reserve_data: Vec<UserReserveData>,
-    user_health_factor: U256,
-) -> Option<DebtCollateralPairInfo> {
+fn generate_reserve_details() -> HashMap<Address, (String, U256)> {
+    /*
+    symbol;liqBonus;underlyingAsset;liqFee
+    WETH;5%;0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2;1000
+    wstETH;6%;0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0;1000
+    WBTC;5%;0x2260fac5e5542a773aa44fbcfedf7c193bc2c599;1000
+    USDC;4.5%;0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48;2000
+    DAI;5%;0x6b175474e89094c44da98b954eedeac495271d0f;2000
+    LINK;7%;0x514910771af9ca656af840dff83e8264ecf986ca;1000
+    AAVE;7.5%;0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9;1000
+    cbETH;7.5%;0xbe9895146f7af43049ca1c1ae358b0541ea49704;1000
+    USDT;4.5%;0xdac17f958d2ee523a2206206994597c13d831ec7;1000
+    rETH;7.5%;0xae78736cd615f374d3085123a210448e74fc6393;1000
+    LUSD;4.5%;0x5f98805a4e8be255a32880fdec7f6728c6568ba0;1000
+    CRV;8.3%;0xd533a949740bb3306d119cc777fa900ba034cd52;1000
+    MKR;8.5%;0x9f8f72aa9304c8b593d555f12ef6589cc3a579a2;1000
+    SNX;8.5%;0xc011a73ee8576fb46f5e1c5751ca3b9fe0af2a6f;1000
+    BAL;8.3%;0xba100000625a3754423978a60c9317c58a424e3d;1000
+    UNI;0%;0x1f9840a85d5af5bf1d1762f925bdaddc4201f984;1000
+    LDO;9%;0x5a98fcbea516cf06857215779fd812ca3bef1b32;1000
+    ENS;8%;0xc18360217d8f7ab5e7c516566761ea12ce7f9d72;1000
+    1INCH;7.5%;0x111111111117dc0aa78b770fa6a738034120c302;1000
+    FRAX;6%;0x853d955acef822db058eb8505911ed77f175b99e;1000
+    GHO;0%;0x40d16fc0246ad3160ccc09b8d0d3a2cd28ae6c2f;0
+    RPL;0%;0xd33526068d116ce69f19a9ee46f0bd304f21a51f;0
+    sDAI;4.5%;0x83f20f44975d03b1b09e64809b757c47f942beea;1000
+    STG;0%;0xaf5191b0de278c7286d6c7cc6ab6bb8a73ba2cd6;1000
+    KNC;0%;0xdefa4e8a7bcba345f687a2f1456f5edd9ce97202;1000
+    FXS;0%;0x3432b6a60d23ca0dfca7761b7ab56459d9c964d0;1000
+    crvUSD;0%;0xf939e0a03fb07f59a73314e73794be0e57ac1b4e;0
+    PYUSD;7.5%;0x6c3ea9036406852006290770bedfcaba0e23a0e8;1000
+    weETH;7%;0xcd5fe23c85820f7b72d0926fc9b05b43e359b7ee;1000
+    osETH;7.5%;0xf1c9acdc66974dfb6decb12aa385b9cd01190e38;1000
+    USDe;8.5%;0x4c9edd5852cd905f086c759e8383e09bff1e68b3;1000
+    ETHx;7.5%;0xa35b1b31ce002fbf2058d22f30f95d405200a15b;1000
+    sUSDe;8.5%;0x9d39a5de30e57443bff2a8307a4256c8797a3497;1000
+    tBTC;7.5%;0x18084fba666a33d37592fa2633fd49a74dd93a88;1000
+    cbBTC;7.5%;0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf;1000
+    USDS;7.5%;0xdc035d45d973e3ec169d2276ddab16f1e407384f;1000
+    rsETH;7.5%;0xa1290d69c65a6fe4df752f95823fae25cb99e5a7;1000
+    LBTC;8.5%;0x8236a87084f8b84306f72007f36f2618a5634494;1000
+    */
     let mut reserve_details = HashMap::new();
     reserve_details.insert(
         address!("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"),
@@ -287,42 +283,52 @@ fn get_best_debt_collateral_pair(
         address!("0x8236a87084f8b84306f72007f36f2618a5634494"),
         ("LBTC".to_string(), U256::from(10850)),
     );
+    reserve_details
+}
 
+fn get_best_debt_collateral_pair(
+    user_reserve_data: Vec<UserReserveData>,
+    user_health_factor: U256,
+) -> Option<DebtCollateralPairInfo> {
+    let reserve_details = generate_reserve_details();
     let mut best_pair: Option<DebtCollateralPairInfo> = None;
-    let mut max_net_gain = U256::ZERO;
+    let mut max_net_gain = U256::from(0);
     let mut liquidation_close_factor;
-
     for reserve in user_reserve_data
         .iter()
-        .filter(|r| r.scaledVariableDebt > U256::ZERO)
+        .filter(|r| r.scaledVariableDebt > U256::from(0))
     {
         for collateral in user_reserve_data
             .iter()
-            .filter(|r| r.scaledATokenBalance > U256::ZERO && r.usageAsCollateralEnabledOnUser)
+            .filter(|r| r.scaledATokenBalance > U256::from(0) && r.usageAsCollateralEnabledOnUser)
         {
             if let (Some((debt_symbol, _)), Some((collateral_symbol, bonus))) = (
                 reserve_details.get(&reserve.underlyingAsset),
                 reserve_details.get(&collateral.underlyingAsset),
             ) {
+                // source: https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/logic/LiquidationLogic.sol#L50-L68
                 if user_health_factor <= U256::from(0.95e18) {
-                    liquidation_close_factor = U256::from(1);
+                    liquidation_close_factor = U256::from(1e4);
                 } else {
-                    liquidation_close_factor = U256::from(0.5);
+                    liquidation_close_factor = U256::from(0.5e4);
                 };
-                let amount_to_liquidate = reserve.scaledVariableDebt * liquidation_close_factor;
-                let bonus_multiplier = *bonus / U256::from(10000);
-                let collateral_seized = amount_to_liquidate * bonus_multiplier;
+                // This mimics percentMul at https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/math/PercentageMath.sol#L25
+                // the same way it's used here: https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/logic/LiquidationLogic.sol#L379
+                let amount_to_liquidate = ((reserve.scaledVariableDebt * liquidation_close_factor) + U256::from(0.5e4)) / U256::from(1e4);
+                let bonus_multiplier = (*bonus * U256::from(1e18)) / U256::from(10000);
+                let collateral_seized = (amount_to_liquidate * bonus_multiplier) / U256::from(1e18);
                 let liquidation_profit = collateral_seized - amount_to_liquidate;
+                info!("debt ({}) | close_factor ({}) | bonus ({}) | bonus_mult ({}) | collateral_seized ({})", amount_to_liquidate, liquidation_close_factor, *bonus, bonus_multiplier, collateral_seized);
                 if liquidation_profit > max_net_gain {
                     max_net_gain = liquidation_profit;
                     best_pair = Some(DebtCollateralPairInfo {
                         debt_asset: reserve.underlyingAsset,
                         debt_symbol: debt_symbol.clone(),
-                        debt_amount: amount_to_liquidate,
+                        debt_amount: amount_to_liquidate / U256::from(1e18),
                         collateral_asset: collateral.underlyingAsset,
                         collateral_symbol: collateral_symbol.clone(),
-                        collateral_seized,
-                        liquidation_profit,
+                        collateral_seized: collateral_seized / U256::from(1e18),
+                        liquidation_profit: liquidation_profit / U256::from(1e18),
                     });
                 }
             }
@@ -358,7 +364,7 @@ pub async fn convert_eth_to_asset(
     Ok(amount_in_asset)
 }
 
-async fn process_uw_event(uw_event: UnderwaterUserEvent, provider_cache: Arc<ProviderCache>) {
+async fn process_uw_event(uw_event: UnderwaterUserEvent, provider_cache: Arc<ProviderCache>) -> Result<(), Box<dyn std::error::Error>> {
     let process_uw_event_timer = Instant::now();
     match provider_cache.get_provider().await {
         Ok(provider) => {
@@ -366,7 +372,6 @@ async fn process_uw_event(uw_event: UnderwaterUserEvent, provider_cache: Arc<Pro
                 AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS,
                 provider.clone(),
             );
-
             let aave_oracle: AaveOracle::AaveOracleInstance<
                 PubSubFrontend,
                 Arc<RootProvider<PubSubFrontend>>,
@@ -378,31 +383,34 @@ async fn process_uw_event(uw_event: UnderwaterUserEvent, provider_cache: Arc<Pro
                 .await
             {
                 Ok(user_reserves_data) => {
-                    let best_pair = get_best_debt_collateral_pair(
+                    if let Some(best_pair) = get_best_debt_collateral_pair(
                         user_reserves_data._0,
                         uw_event.user_account_data.healthFactor,
-                    )
-                    .unwrap();
-                    info!(
-                        "opportunity analysis for {}: repay {} {} to get raw/net {}/{} {} ({}/{} USD) as reward - {:?}ms", 
-                        uw_event.address,
-                        convert_eth_to_asset(aave_oracle.clone(), best_pair.debt_asset, best_pair.debt_amount).await.unwrap(),
-                        best_pair.debt_symbol,
-                        best_pair.collateral_seized,
-                        best_pair.liquidation_profit,
-                        best_pair.collateral_symbol,
-                        convert_eth_to_asset(aave_oracle.clone(), best_pair.collateral_asset, best_pair.collateral_seized).await.unwrap(),
-                        convert_eth_to_asset(aave_oracle.clone(), best_pair.collateral_asset, best_pair.liquidation_profit).await.unwrap(),
-                        process_uw_event_timer.elapsed(),
-                    );
+                    ) {
+                        info!(
+                            "opportunity analysis for {}: repay {} {} to get raw/net {}/{} {} ({}/{} USD) as reward - {:?}ms", 
+                            uw_event.address,
+                            convert_eth_to_asset(aave_oracle.clone(), best_pair.debt_asset, best_pair.debt_amount).await.unwrap(),
+                            best_pair.debt_symbol,
+                            best_pair.collateral_seized,
+                            best_pair.liquidation_profit,
+                            best_pair.collateral_symbol,
+                            convert_eth_to_asset(aave_oracle.clone(), best_pair.collateral_asset, best_pair.collateral_seized).await.unwrap(),
+                            convert_eth_to_asset(aave_oracle.clone(), best_pair.collateral_asset, best_pair.liquidation_profit).await.unwrap(),
+                            process_uw_event_timer.elapsed(),
+                        );
+                    } else {
+                        warn!("No profitable liquidation pair found for {}", uw_event.address);
+                    }
                 }
                 Err(e) => {
                     warn!("Failed to fetch user reserves data: {e}");
                 }
             }
         }
-        Err(e) => warn!("Failed to fetch UI data provider: {e}"),
+        Err(e) => warn!("Failed to get the provider for uw processing: {e}"),
     }
+    Ok(())
 }
 
 #[tokio::main]
@@ -421,12 +429,15 @@ async fn main() {
         PROFITO_INBOUND_ENDPOINT
     );
     loop {
-        // Inner loop handles recv
         match socket.recv_bytes(0) {
             Ok(bytes) => match bincode::deserialize::<UnderwaterUserEvent>(&bytes) {
                 Ok(uw_event) => {
                     let provider_cache = provider_cache.clone();
-                    tokio::spawn(process_uw_event(uw_event, provider_cache));
+                    tokio::spawn(async move {
+                        if let Err(e) = process_uw_event(uw_event, provider_cache).await {
+                            warn!("Failed to process underwater event: {e}");
+                        }
+                    });
                 }
                 Err(e) => warn!("Failed to deserialize message: {e}"),
             },
