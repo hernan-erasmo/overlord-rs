@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use tracing_appender::rolling::{self, Rotation};
 use tracing_subscriber::fmt::{time::LocalTime, writer::BoxMakeWriter};
-use AaveProtocolDataProvider::getReserveConfigurationDataReturn;
+use AaveProtocolDataProvider::{getLiquidationProtocolFeeReturn, getReserveConfigurationDataReturn};
 use IUiPoolDataProviderV3::UserReserveData;
 
 sol!(
@@ -97,16 +97,17 @@ struct DebtCollateralPairInfo {
     collateral_asset: Address,
     collateral_symbol: String,
     collateral_seized: U256,
-    liquidation_profit: U256,
+    net_profit: U256,
 }
 
 #[derive(Debug, Clone)]
-struct ReserveConfigurationDataWithSymbol {
+struct ReserveConfigurationEnhancedData {
     symbol: String,
     data: getReserveConfigurationDataReturn,
+    liquidation_fee: U256,
 }
 
-type ReserveConfigurationData = HashMap<Address, ReserveConfigurationDataWithSymbol>;
+type ReserveConfigurationData = HashMap<Address, ReserveConfigurationEnhancedData>;
 
 async fn generate_reserve_details_by_asset(
     provider_cache: Arc<ProviderCache>,
@@ -297,24 +298,18 @@ async fn generate_reserve_details_by_asset(
                 AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS,
                 provider.clone(),
             );
-
+            let unknown_asset = String::from("unknown_asset");
             for reserve_address in reserves {
+                let symbol = symbols_by_address.get(&reserve_address).unwrap_or(&unknown_asset);
+                let data: getReserveConfigurationDataReturn;
+                let liquidation_fee: U256;
                 match aave_config
                     .getReserveConfigurationData(reserve_address)
                     .call()
                     .await
                 {
                     Ok(reserve_config) => {
-                        configuration_data.insert(
-                            reserve_address,
-                            ReserveConfigurationDataWithSymbol {
-                                symbol: symbols_by_address
-                                    .get(&reserve_address)
-                                    .cloned()
-                                    .unwrap_or_default(),
-                                data: reserve_config,
-                            },
-                        );
+                        data = reserve_config
                     }
                     Err(e) => {
                         return Err(format!(
@@ -324,6 +319,24 @@ async fn generate_reserve_details_by_asset(
                         .into())
                     }
                 }
+                match aave_config
+                    .getLiquidationProtocolFee(reserve_address)
+                    .call()
+                    .await
+                {
+                    Ok(fee_response) => {
+                        liquidation_fee = fee_response._0;
+                    },
+                    Err(e) => {
+                        return Err(format!("Failed to get reserve liquidation fee for asset {}: {}", reserve_address, e).into())
+                    }
+                }
+                configuration_data.insert(
+                    reserve_address,
+                    ReserveConfigurationEnhancedData {
+                        symbol: symbol.clone(), data, liquidation_fee
+                    },
+                );
             }
         }
         Err(e) => {
@@ -337,13 +350,25 @@ async fn generate_reserve_details_by_asset(
     Ok(configuration_data)
 }
 
+/// This mimics `percentMul` at
+/// https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/math/PercentageMath.sol#L25
+fn percent_mul(value: U256, percentage: U256) -> U256 {
+    (value * percentage + U256::from(0.5e4)) / U256::from(1e4)
+}
+
+/// This mimics `percentDiv` at
+/// https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/math/PercentageMath.sol#L48
+fn percent_div(value: U256, percentage: U256) -> U256 {
+    ((value * U256::from(1e4)) + (percentage / U256::from(2))) / percentage
+}
+
 fn get_best_debt_collateral_pair(
     reserves_configuration: ReserveConfigurationData,
     user_reserve_data: Vec<UserReserveData>,
     user_health_factor: U256,
 ) -> Option<DebtCollateralPairInfo> {
     let mut best_pair: Option<DebtCollateralPairInfo> = None;
-    let mut max_net_gain = U256::from(0);
+    let mut max_net_profit = U256::from(0);
     let mut liquidation_close_factor;
     for reserve in user_reserve_data
         .iter()
@@ -359,35 +384,74 @@ fn get_best_debt_collateral_pair(
             ) {
                 let debt_symbol = &debt_config.symbol;
                 let collateral_symbol = &collateral_config.symbol;
-                let bonus = &collateral_config.data.liquidationBonus;
+
                 // source: https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/logic/LiquidationLogic.sol#L50-L68
                 if user_health_factor <= U256::from(0.95e18) {
                     liquidation_close_factor = U256::from(1e4);
                 } else {
                     liquidation_close_factor = U256::from(0.5e4);
                 };
-                // This mimics percentMul at https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/math/PercentageMath.sol#L25
-                // the same way it's used here: https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/logic/LiquidationLogic.sol#L379
-                let actual_debt_to_liquidate =
-                    ((reserve.scaledVariableDebt * liquidation_close_factor) + U256::from(0.5e4))
-                        / U256::from(1e4);
+                
+                // https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/logic/LiquidationLogic.sol#L379
+                let actual_debt_to_liquidate = percent_mul(reserve.scaledVariableDebt, liquidation_close_factor);
 
-                // under this line, we don't know what we're doing (YET)
-                let bonus_multiplier = (*bonus * U256::from(1e18)) / U256::from(10000);
-                let collateral_seized =
-                    (actual_debt_to_liquidate * bonus_multiplier) / U256::from(1e18);
-                let liquidation_profit = collateral_seized - actual_debt_to_liquidate;
-                info!("debt ({}) | close_factor ({}) | bonus ({}) | bonus_mult ({}) | collateral_seized ({})", actual_debt_to_liquidate, liquidation_close_factor, *bonus, bonus_multiplier, collateral_seized);
-                if liquidation_profit > max_net_gain {
-                    max_net_gain = liquidation_profit;
+                let collateral_asset_price: U256;
+                let debt_asset_price: U256;
+
+                let collateral_decimals = collateral_config.data.decimals;
+                let debt_decimals = debt_config.data.decimals;
+
+                let collateral_asset_unit = U256::from(10).pow(U256::from(collateral_decimals));
+                let debt_asset_unit = U256::from(10).pow(U256::from(debt_decimals));
+
+                let base_collateral = (debt_asset_price * actual_debt_to_liquidate * collateral_asset_unit) / (collateral_asset_price * debt_asset_unit);
+                // Yes, the liquidation bonus considered here is an attribute of the collateral asset. The following traces from here
+                // https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/logic/LiquidationLogic.sol#L498
+                // to
+                // https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/logic/LiquidationLogic.sol#L146
+                let max_collateral_to_liquidate = percent_mul(base_collateral, collateral_config.data.liquidationBonus);
+
+                let collateral_amount: U256;
+                let debt_amount_needed: U256;
+                if max_collateral_to_liquidate > collateral.scaledATokenBalance {
+                    collateral_amount = collateral.scaledATokenBalance;
+                    debt_amount_needed = percent_div((collateral_asset_price * collateral_amount * debt_asset_unit) / (debt_asset_price * collateral_asset_unit), collateral_config.data.liquidationBonus);
+                } else {
+                    collateral_amount = max_collateral_to_liquidate;
+                    debt_amount_needed = actual_debt_to_liquidate;
+                }
+
+                let bonus_collateral: U256;
+                let mut liquidation_fee = U256::from(0);
+                if collateral_config.liquidation_fee != U256::from(0) {
+                    bonus_collateral = collateral_amount - percent_div(collateral_amount, collateral_config.data.liquidationBonus);
+                    liquidation_fee = percent_mul(bonus_collateral, collateral_config.liquidation_fee);
+                }
+
+                /*
+                    Now, at this point, we already know the values of everything returned by _calculateAvailableCollateralToLiquidate(),
+
+                    (
+                        actualCollateralToLiquidate,  # in this code, this is collateral_amount - liquidation_protocol_fee
+                        actualDebtToLiquidate,        # in this code, this is debt_amount_needed
+                        liquidationProtocolFeeAmount  # in this code, this is liquidation_fee
+                    )
+                */
+                info!(
+                    "Debt: {}, Collateral: {}, Collateral Seized: {}, Net Profit: {}",
+                    debt_amount_needed, collateral_amount, collateral_amount - liquidation_fee, collateral_amount - liquidation_fee - debt_amount_needed
+                );
+                let net_profit = (collateral_amount * collateral_asset_price) - debt_amount_needed - liquidation_fee;
+                if net_profit > max_net_profit {
+                    max_net_profit = net_profit;
                     best_pair = Some(DebtCollateralPairInfo {
                         debt_asset: reserve.underlyingAsset,
                         debt_symbol: debt_symbol.clone(),
-                        debt_amount: actual_debt_to_liquidate / U256::from(1e18),
+                        debt_amount: debt_amount_needed,
                         collateral_asset: collateral.underlyingAsset,
                         collateral_symbol: collateral_symbol.clone(),
-                        collateral_seized: collateral_seized / U256::from(1e18),
-                        liquidation_profit: liquidation_profit / U256::from(1e18),
+                        collateral_seized: collateral_amount,
+                        net_profit,
                     });
                 }
             }
@@ -451,18 +515,20 @@ async fn process_uw_event(
                         user_reserves_data._0,
                         uw_event.user_account_data.healthFactor,
                     ) {
+                        /*
                         info!(
                             "opportunity analysis for {}: repay {} {} to get raw/net {}/{} {} ({}/{} USD) as reward - {:?}ms", 
                             uw_event.address,
                             convert_eth_to_asset(aave_oracle.clone(), best_pair.debt_asset, best_pair.debt_amount).await.unwrap(),
                             best_pair.debt_symbol,
                             best_pair.collateral_seized,
-                            best_pair.liquidation_profit,
+                            best_pair.net_profit,
                             best_pair.collateral_symbol,
                             convert_eth_to_asset(aave_oracle.clone(), best_pair.collateral_asset, best_pair.collateral_seized).await.unwrap(),
-                            convert_eth_to_asset(aave_oracle.clone(), best_pair.collateral_asset, best_pair.liquidation_profit).await.unwrap(),
+                            convert_eth_to_asset(aave_oracle.clone(), best_pair.collateral_asset, best_pair.net_profit).await.unwrap(),
                             process_uw_event_timer.elapsed(),
                         );
+                         */
                     } else {
                         warn!(
                             "No profitable liquidation pair found for {}",
@@ -489,7 +555,7 @@ async fn main() {
     let socket = context.socket(zmq::PULL).unwrap();
     if let Err(e) = socket.bind(PROFITO_INBOUND_ENDPOINT) {
         error!("Failed to bind ZMQ socket: {e}");
-        return;
+        std::process::exit(1);
     }
     info!(
         "Listening for health factor alerts on {}",
