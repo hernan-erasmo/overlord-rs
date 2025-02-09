@@ -11,7 +11,9 @@ use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use tracing_appender::rolling::{self, Rotation};
 use tracing_subscriber::fmt::{time::LocalTime, writer::BoxMakeWriter};
-use AaveProtocolDataProvider::{getLiquidationProtocolFeeReturn, getReserveConfigurationDataReturn};
+use AaveProtocolDataProvider::{
+    getLiquidationProtocolFeeReturn, getReserveConfigurationDataReturn,
+};
 use IUiPoolDataProviderV3::UserReserveData;
 
 sol!(
@@ -300,7 +302,9 @@ async fn generate_reserve_details_by_asset(
             );
             let unknown_asset = String::from("unknown_asset");
             for reserve_address in reserves {
-                let symbol = symbols_by_address.get(&reserve_address).unwrap_or(&unknown_asset);
+                let symbol = symbols_by_address
+                    .get(&reserve_address)
+                    .unwrap_or(&unknown_asset);
                 let data: getReserveConfigurationDataReturn;
                 let liquidation_fee: U256;
                 match aave_config
@@ -308,9 +312,7 @@ async fn generate_reserve_details_by_asset(
                     .call()
                     .await
                 {
-                    Ok(reserve_config) => {
-                        data = reserve_config
-                    }
+                    Ok(reserve_config) => data = reserve_config,
                     Err(e) => {
                         return Err(format!(
                             "Failed to get reserve configuration data for asset {}: {}",
@@ -326,15 +328,21 @@ async fn generate_reserve_details_by_asset(
                 {
                     Ok(fee_response) => {
                         liquidation_fee = fee_response._0;
-                    },
+                    }
                     Err(e) => {
-                        return Err(format!("Failed to get reserve liquidation fee for asset {}: {}", reserve_address, e).into())
+                        return Err(format!(
+                            "Failed to get reserve liquidation fee for asset {}: {}",
+                            reserve_address, e
+                        )
+                        .into())
                     }
                 }
                 configuration_data.insert(
                     reserve_address,
                     ReserveConfigurationEnhancedData {
-                        symbol: symbol.clone(), data, liquidation_fee
+                        symbol: symbol.clone(),
+                        data,
+                        liquidation_fee,
                     },
                 );
             }
@@ -391,9 +399,10 @@ fn get_best_debt_collateral_pair(
                 } else {
                     liquidation_close_factor = U256::from(0.5e4);
                 };
-                
+
                 // https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/logic/LiquidationLogic.sol#L379
-                let actual_debt_to_liquidate = percent_mul(reserve.scaledVariableDebt, liquidation_close_factor);
+                let actual_debt_to_liquidate =
+                    percent_mul(reserve.scaledVariableDebt, liquidation_close_factor);
 
                 let collateral_asset_price: U256;
                 let debt_asset_price: U256;
@@ -404,18 +413,25 @@ fn get_best_debt_collateral_pair(
                 let collateral_asset_unit = U256::from(10).pow(U256::from(collateral_decimals));
                 let debt_asset_unit = U256::from(10).pow(U256::from(debt_decimals));
 
-                let base_collateral = (debt_asset_price * actual_debt_to_liquidate * collateral_asset_unit) / (collateral_asset_price * debt_asset_unit);
+                let base_collateral =
+                    (debt_asset_price * actual_debt_to_liquidate * collateral_asset_unit)
+                        / (collateral_asset_price * debt_asset_unit);
                 // Yes, the liquidation bonus considered here is an attribute of the collateral asset. The following traces from here
                 // https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/logic/LiquidationLogic.sol#L498
                 // to
                 // https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/logic/LiquidationLogic.sol#L146
-                let max_collateral_to_liquidate = percent_mul(base_collateral, collateral_config.data.liquidationBonus);
+                let max_collateral_to_liquidate =
+                    percent_mul(base_collateral, collateral_config.data.liquidationBonus);
 
                 let collateral_amount: U256;
                 let debt_amount_needed: U256;
                 if max_collateral_to_liquidate > collateral.scaledATokenBalance {
                     collateral_amount = collateral.scaledATokenBalance;
-                    debt_amount_needed = percent_div((collateral_asset_price * collateral_amount * debt_asset_unit) / (debt_asset_price * collateral_asset_unit), collateral_config.data.liquidationBonus);
+                    debt_amount_needed = percent_div(
+                        (collateral_asset_price * collateral_amount * debt_asset_unit)
+                            / (debt_asset_price * collateral_asset_unit),
+                        collateral_config.data.liquidationBonus,
+                    );
                 } else {
                     collateral_amount = max_collateral_to_liquidate;
                     debt_amount_needed = actual_debt_to_liquidate;
@@ -424,8 +440,10 @@ fn get_best_debt_collateral_pair(
                 let bonus_collateral: U256;
                 let mut liquidation_fee = U256::from(0);
                 if collateral_config.liquidation_fee != U256::from(0) {
-                    bonus_collateral = collateral_amount - percent_div(collateral_amount, collateral_config.data.liquidationBonus);
-                    liquidation_fee = percent_mul(bonus_collateral, collateral_config.liquidation_fee);
+                    bonus_collateral = collateral_amount
+                        - percent_div(collateral_amount, collateral_config.data.liquidationBonus);
+                    liquidation_fee =
+                        percent_mul(bonus_collateral, collateral_config.liquidation_fee);
                 }
 
                 /*
@@ -439,9 +457,14 @@ fn get_best_debt_collateral_pair(
                 */
                 info!(
                     "Debt: {}, Collateral: {}, Collateral Seized: {}, Net Profit: {}",
-                    debt_amount_needed, collateral_amount, collateral_amount - liquidation_fee, collateral_amount - liquidation_fee - debt_amount_needed
+                    debt_amount_needed,
+                    collateral_amount,
+                    collateral_amount - liquidation_fee,
+                    collateral_amount - liquidation_fee - debt_amount_needed
                 );
-                let net_profit = (collateral_amount * collateral_asset_price) - debt_amount_needed - liquidation_fee;
+                let net_profit = (collateral_amount * collateral_asset_price)
+                    - debt_amount_needed
+                    - liquidation_fee;
                 if net_profit > max_net_profit {
                     max_net_profit = net_profit;
                     best_pair = Some(DebtCollateralPairInfo {
@@ -517,7 +540,7 @@ async fn process_uw_event(
                     ) {
                         /*
                         info!(
-                            "opportunity analysis for {}: repay {} {} to get raw/net {}/{} {} ({}/{} USD) as reward - {:?}ms", 
+                            "opportunity analysis for {}: repay {} {} to get raw/net {}/{} {} ({}/{} USD) as reward - {:?}ms",
                             uw_event.address,
                             convert_eth_to_asset(aave_oracle.clone(), best_pair.debt_asset, best_pair.debt_amount).await.unwrap(),
                             best_pair.debt_symbol,
