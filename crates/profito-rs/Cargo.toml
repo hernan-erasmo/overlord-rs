@@ -3,6 +3,10 @@ name = "profito-rs"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "bpchecker"
+path = "bin/bpchecker.rs"
+
 [dependencies]
 alloy.workspace = true
 bincode.workspace = true
