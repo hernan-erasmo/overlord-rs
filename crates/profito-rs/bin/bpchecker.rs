@@ -338,6 +338,8 @@ async fn calculate_pair_profitability(
     liquidation_close_factor: U256,
     actual_debt_to_liquidate: U256,
 ) -> (U256, U256, U256) {
+    let collateral_config = reserves_configuration.get(&supplied_reserve.underlyingAsset).unwrap();
+    let debt_config = reserves_configuration.get(&supplied_reserve.underlyingAsset).unwrap();
     let actual_collateral_to_liquidate = U256::ZERO;
     let liquidation_protocol_fee_amount = U256::ZERO;
     let collateral_asset_price: U256;
@@ -386,6 +388,15 @@ async fn calculate_pair_profitability(
         base_collateral,
         format_units(base_collateral, collateral_asset_decimals).unwrap(),
         format_units(base_collateral * collateral_asset_price, collateral_asset_decimals + 8).unwrap(),
+    );
+
+    let max_collateral_to_liquidate =
+    percent_mul(base_collateral, collateral_config.data.liquidationBonus);
+    println!(
+        "\t\tmax collateral to liquidate = {} ({}) ($ {})",
+        max_collateral_to_liquidate,
+        format_units(max_collateral_to_liquidate, collateral_asset_decimals).unwrap(),
+        format_units(max_collateral_to_liquidate * collateral_asset_price, collateral_asset_decimals + 8).unwrap(),
     );
 
     (actual_collateral_to_liquidate, actual_debt_to_liquidate, liquidation_protocol_fee_amount)
