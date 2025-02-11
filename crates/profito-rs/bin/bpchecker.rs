@@ -1,5 +1,5 @@
 use alloy::{
-    primitives::{address, Address, utils::format_units, U256},
+    primitives::{address, utils::format_units, Address, U256},
     providers::{IpcConnect, ProviderBuilder, RootProvider},
     pubsub::PubSubFrontend,
     sol,
@@ -226,10 +226,8 @@ async fn generate_reserve_details_by_asset(
     );
 
     let mut configuration_data: ReserveConfigurationData = HashMap::new();
-    let aave_config = AaveProtocolDataProvider::new(
-        AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS,
-        provider.clone(),
-    );
+    let aave_config =
+        AaveProtocolDataProvider::new(AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS, provider.clone());
     let unknown_asset = String::from("unknown_asset");
     for reserve in reserves {
         let symbol = symbols_by_address
@@ -279,43 +277,45 @@ async fn generate_reserve_details_by_asset(
 
 /// Get's the list of user reserves, but only returns those that the user has at least some debt or collateral and,
 /// for the later, the ones that are allowed to be used as collateral
-async fn get_user_reserves_data(provider: RootProvider<PubSubFrontend>, user_address: Address) -> Vec<UserReserveData> {
-    let ui_data = AaveUIPoolDataProvider::new(
-        AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS,
-        provider.clone(),
-    );
+async fn get_user_reserves_data(
+    provider: RootProvider<PubSubFrontend>,
+    user_address: Address,
+) -> Vec<UserReserveData> {
+    let ui_data =
+        AaveUIPoolDataProvider::new(AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, provider.clone());
     let user_reserves_data: Vec<ui::IUiPoolDataProviderV3::UserReserveData>;
 
     match ui_data
         .getUserReservesData(AAVE_V3_PROVIDER_ADDRESS, user_address)
         .call()
-        .await {
-            Ok(user_reserves) => {
-                user_reserves_data = user_reserves._0;
-            },
-            Err(e) => {
-                eprintln!("Error trying to call AaveUIPoolDataProvider: {}", e);
-                std::process::exit(1);
-            }
+        .await
+    {
+        Ok(user_reserves) => {
+            user_reserves_data = user_reserves._0;
         }
-    user_reserves_data.iter().filter(|reserve| {
-        reserve.scaledVariableDebt > U256::ZERO || (reserve.scaledATokenBalance > U256::ZERO && reserve.usageAsCollateralEnabledOnUser)
-    }).cloned().collect()
+        Err(e) => {
+            eprintln!("Error trying to call AaveUIPoolDataProvider: {}", e);
+            std::process::exit(1);
+        }
+    }
+    user_reserves_data
+        .iter()
+        .filter(|reserve| {
+            reserve.scaledVariableDebt > U256::ZERO
+                || (reserve.scaledATokenBalance > U256::ZERO
+                    && reserve.usageAsCollateralEnabledOnUser)
+        })
+        .cloned()
+        .collect()
 }
 
 async fn get_user_health_factor(provider: RootProvider<PubSubFrontend>, user: Address) -> U256 {
-    let pool = pool::AaveV3Pool::new(
-        AAVE_V3_POOL_ADDRESS,
-        provider.clone(),
-    );
+    let pool = pool::AaveV3Pool::new(AAVE_V3_POOL_ADDRESS, provider.clone());
     let health_factor: U256;
-    match pool
-        .getUserAccountData(user)
-        .call()
-        .await {
+    match pool.getUserAccountData(user).call().await {
         Ok(account_data) => {
             health_factor = account_data.healthFactor;
-        },
+        }
         Err(e) => {
             eprintln!("Error trying to call getUserAccountData: {}", e);
             std::process::exit(1);
@@ -344,42 +344,72 @@ async fn calculate_pair_profitability(
     liquidation_close_factor: U256,
     mut actual_debt_to_liquidate: U256,
 ) -> (U256, U256, U256) {
-    let collateral_config = reserves_configuration.get(&supplied_reserve.underlyingAsset).unwrap();
-    let debt_config = reserves_configuration.get(&supplied_reserve.underlyingAsset).unwrap();
+    let collateral_config = reserves_configuration
+        .get(&supplied_reserve.underlyingAsset)
+        .unwrap();
+    let debt_config = reserves_configuration
+        .get(&supplied_reserve.underlyingAsset)
+        .unwrap();
     let actual_collateral_to_liquidate = U256::ZERO;
     let liquidation_protocol_fee_amount = U256::ZERO;
     let collateral_asset_price: U256;
     let debt_asset_price: U256;
-    let aave_oracle: AaveOracle::AaveOracleInstance<PubSubFrontend, RootProvider<PubSubFrontend>> = AaveOracle::new(AAVE_ORACLE_ADDRESS, provider.clone());
-    match aave_oracle.getAssetPrice(borrowed_reserve.underlyingAsset).call().await {
+    let aave_oracle: AaveOracle::AaveOracleInstance<PubSubFrontend, RootProvider<PubSubFrontend>> =
+        AaveOracle::new(AAVE_ORACLE_ADDRESS, provider.clone());
+    match aave_oracle
+        .getAssetPrice(borrowed_reserve.underlyingAsset)
+        .call()
+        .await
+    {
         Ok(price_response) => {
             debt_asset_price = price_response._0;
-        },
+        }
         Err(e) => {
             eprintln!("Error trying to call getAssetPrice: {}", e);
             std::process::exit(1);
         }
     };
-    match aave_oracle.getAssetPrice(supplied_reserve.underlyingAsset).call().await {
+    match aave_oracle
+        .getAssetPrice(supplied_reserve.underlyingAsset)
+        .call()
+        .await
+    {
         Ok(price_response) => {
             collateral_asset_price = price_response._0;
-        },
+        }
         Err(e) => {
             eprintln!("Error trying to call getAssetPrice: {}", e);
             std::process::exit(1);
         }
     };
-    println!("\t\tprice per debt unit (debt_asset_price) = {} ($ {})", debt_asset_price, format_units(debt_asset_price, 8).unwrap());
-    println!("\t\tprice per collateral unit (collateral_asset_price) = {} ($ {})", collateral_asset_price, format_units(collateral_asset_price, 8).unwrap());
+    println!(
+        "\t\tprice per debt unit (debt_asset_price) = {} ($ {})",
+        debt_asset_price,
+        format_units(debt_asset_price, 8).unwrap()
+    );
+    println!(
+        "\t\tprice per collateral unit (collateral_asset_price) = {} ($ {})",
+        collateral_asset_price,
+        format_units(collateral_asset_price, 8).unwrap()
+    );
 
-    let debt_asset_decimals = reserves_configuration.get(&borrowed_reserve.underlyingAsset).unwrap().data.decimals.to::<u8>();
-    let collateral_asset_decimals = reserves_configuration.get(&supplied_reserve.underlyingAsset).unwrap().data.decimals.to::<u8>();
+    let debt_asset_decimals = reserves_configuration
+        .get(&borrowed_reserve.underlyingAsset)
+        .unwrap()
+        .data
+        .decimals
+        .to::<u8>();
+    let collateral_asset_decimals = reserves_configuration
+        .get(&supplied_reserve.underlyingAsset)
+        .unwrap()
+        .data
+        .decimals
+        .to::<u8>();
 
     let debt_asset_unit = U256::from(10).pow(U256::from(debt_asset_decimals));
     let collateral_asset_unit = U256::from(10).pow(U256::from(collateral_asset_decimals));
 
-    let base_collateral =
-    (debt_asset_price * actual_debt_to_liquidate * collateral_asset_unit)
+    let base_collateral = (debt_asset_price * actual_debt_to_liquidate * collateral_asset_unit)
         / (collateral_asset_price * debt_asset_unit);
 
     println!(
@@ -387,22 +417,34 @@ async fn calculate_pair_profitability(
         borrowed_reserve.scaledVariableDebt,
         format_units(liquidation_close_factor, 4).unwrap(),
         actual_debt_to_liquidate,
-        format_units(borrowed_reserve.scaledVariableDebt * debt_asset_price, debt_asset_decimals + 8).unwrap(),
+        format_units(
+            borrowed_reserve.scaledVariableDebt * debt_asset_price,
+            debt_asset_decimals + 8
+        )
+        .unwrap(),
     );
     println!(
         "\t\tbase collateral = {} ({} units) ($ {})",
         base_collateral,
         format_units(base_collateral, collateral_asset_decimals).unwrap(),
-        format_units(base_collateral * collateral_asset_price, collateral_asset_decimals + 8).unwrap(),
+        format_units(
+            base_collateral * collateral_asset_price,
+            collateral_asset_decimals + 8
+        )
+        .unwrap(),
     );
 
     let max_collateral_to_liquidate =
-    percent_mul(base_collateral, collateral_config.data.liquidationBonus);
+        percent_mul(base_collateral, collateral_config.data.liquidationBonus);
     println!(
         "\t\tmax collateral to liquidate ({}% of base collateral) = {} ($ {})",
         format_units(collateral_config.data.liquidationBonus, 2).unwrap(),
         max_collateral_to_liquidate,
-        format_units(max_collateral_to_liquidate * collateral_asset_price, collateral_asset_decimals + 8).unwrap(),
+        format_units(
+            max_collateral_to_liquidate * collateral_asset_price,
+            collateral_asset_decimals + 8
+        )
+        .unwrap(),
     );
 
     // Just the same as LiquidationLogic does, we need to make sure the user has enough
@@ -427,13 +469,21 @@ async fn calculate_pair_profitability(
             "\t\t\tnew debt to liquidate = ({}) ({} units) ($ {})",
             actual_debt_to_liquidate,
             format_units(actual_debt_to_liquidate, debt_asset_decimals).unwrap(),
-            format_units(actual_debt_to_liquidate * debt_asset_price, debt_asset_decimals + 8).unwrap(),
+            format_units(
+                actual_debt_to_liquidate * debt_asset_price,
+                debt_asset_decimals + 8
+            )
+            .unwrap(),
         );
         println!(
             "\t\t\tnew collateral to liquidate = ({}) ({} units) ($ {})",
             collateral_amount,
             format_units(collateral_amount, collateral_asset_decimals).unwrap(),
-            format_units(collateral_amount * collateral_asset_price, collateral_asset_decimals + 8).unwrap(),
+            format_units(
+                collateral_amount * collateral_asset_price,
+                collateral_asset_decimals + 8
+            )
+            .unwrap(),
         );
     }
 
@@ -441,23 +491,31 @@ async fn calculate_pair_profitability(
     // `collateral_amount` contains the valid maximum amount to liquidate on this pair, and
     // `amount_debt_to_liquidate` contains the valid maximum amount of debt to repay.
 
-
     let mut bonus_collateral = U256::ZERO;
     let mut liquidation_fee = U256::from(0);
     if collateral_config.liquidation_fee != U256::from(0) {
-        bonus_collateral = collateral_amount - percent_div(collateral_amount, collateral_config.data.liquidationBonus);
+        bonus_collateral = collateral_amount
+            - percent_div(collateral_amount, collateral_config.data.liquidationBonus);
         liquidation_fee = percent_mul(bonus_collateral, collateral_config.liquidation_fee);
     }
     println!(
         "\t\tbonus collateral (max - base) = {} ($ {})",
         bonus_collateral,
-        format_units(bonus_collateral * collateral_asset_price, collateral_asset_decimals + 8).unwrap(),
+        format_units(
+            bonus_collateral * collateral_asset_price,
+            collateral_asset_decimals + 8
+        )
+        .unwrap(),
     );
     println!(
         "\t\tliquidation fee ({}% of bonus collateral) = {} ($ {})",
         format_units(collateral_config.liquidation_fee, 2).unwrap(),
         liquidation_fee,
-        format_units(liquidation_fee * collateral_asset_price, collateral_asset_decimals + 8).unwrap(),
+        format_units(
+            liquidation_fee * collateral_asset_price,
+            collateral_asset_decimals + 8
+        )
+        .unwrap(),
     );
 
     let actual_collateral_to_liquidate = collateral_amount - liquidation_fee;
@@ -465,8 +523,10 @@ async fn calculate_pair_profitability(
     // These aren't relevant to AAVE, that's why you won't find anything on them in Aave code
     // In order to calculate net profit, everthing must be denominated in collateral units
     // otherwise it will return garbage
-    let debt_in_collateral_units = (actual_debt_to_liquidate * debt_asset_price * U256::from(collateral_asset_decimals)) / (collateral_asset_price * U256::from(debt_asset_decimals));
-    
+    let debt_in_collateral_units =
+        (actual_debt_to_liquidate * debt_asset_price * U256::from(collateral_asset_decimals))
+            / (collateral_asset_price * U256::from(debt_asset_decimals));
+
     // THIS IS WHAT WE MUST OPTIMIZE FOR
     let net_profit = actual_collateral_to_liquidate - debt_in_collateral_units;
 
@@ -480,13 +540,17 @@ async fn calculate_pair_profitability(
     );
 
     // This is the actual return tuple from _calculateAvailableCollateralToLiquidate()
-    (actual_collateral_to_liquidate, actual_debt_to_liquidate, liquidation_protocol_fee_amount)
+    (
+        actual_collateral_to_liquidate,
+        actual_debt_to_liquidate,
+        liquidation_protocol_fee_amount,
+    )
 }
 
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = env::args().collect();
-    
+
     if args.len() != 2 {
         eprintln!("Usage: {} <address>", args[0]);
         std::process::exit(1);
@@ -504,9 +568,20 @@ async fn main() {
     let user_reserves_data = get_user_reserves_data(provider.clone(), user_address).await;
 
     // Create reserve configuration struct
-    let reserves_configuration = generate_reserve_details_by_asset(provider.clone(), user_reserves_data.clone()).await;
-    let assets_borrowed = user_reserves_data.iter().filter(|reserve| { reserve.scaledVariableDebt > U256::ZERO }).cloned().collect::<Vec<UserReserveData>>();
-    let assets_supplied = user_reserves_data.iter().filter(|reserve| { reserve.usageAsCollateralEnabledOnUser && reserve.scaledATokenBalance > U256::ZERO }).cloned().collect::<Vec<UserReserveData>>();
+    let reserves_configuration =
+        generate_reserve_details_by_asset(provider.clone(), user_reserves_data.clone()).await;
+    let assets_borrowed = user_reserves_data
+        .iter()
+        .filter(|reserve| reserve.scaledVariableDebt > U256::ZERO)
+        .cloned()
+        .collect::<Vec<UserReserveData>>();
+    let assets_supplied = user_reserves_data
+        .iter()
+        .filter(|reserve| {
+            reserve.usageAsCollateralEnabledOnUser && reserve.scaledATokenBalance > U256::ZERO
+        })
+        .cloned()
+        .collect::<Vec<UserReserveData>>();
 
     // Fetch user health factor
     let user_health_factor = get_user_health_factor(provider.clone(), user_address).await;
@@ -523,8 +598,17 @@ async fn main() {
     // Print user reserves data
     println!("\n### User DEBT ###");
     for reserve in assets_borrowed.clone() {
-        let symbol = reserves_configuration.get(&reserve.underlyingAsset).unwrap().symbol.clone();
-        let decimals = reserves_configuration.get(&reserve.underlyingAsset).unwrap().data.decimals.to::<u8>();
+        let symbol = reserves_configuration
+            .get(&reserve.underlyingAsset)
+            .unwrap()
+            .symbol
+            .clone();
+        let decimals = reserves_configuration
+            .get(&reserve.underlyingAsset)
+            .unwrap()
+            .data
+            .decimals
+            .to::<u8>();
         println!(
             "\t{} - {} ({:?} units)",
             symbol,
@@ -534,8 +618,17 @@ async fn main() {
     }
     println!("\n### User COLLATERAL ###");
     for reserve in assets_supplied.clone() {
-        let symbol = reserves_configuration.get(&reserve.underlyingAsset).unwrap().symbol.clone();
-        let decimals = reserves_configuration.get(&reserve.underlyingAsset).unwrap().data.decimals.to::<u8>();
+        let symbol = reserves_configuration
+            .get(&reserve.underlyingAsset)
+            .unwrap()
+            .symbol
+            .clone();
+        let decimals = reserves_configuration
+            .get(&reserve.underlyingAsset)
+            .unwrap()
+            .data
+            .decimals
+            .to::<u8>();
         println!(
             "\t{} - {} ({:?} units)",
             symbol,
@@ -550,21 +643,36 @@ async fn main() {
     // Start iterating over available pairs
     let total_combinations = assets_borrowed.len() * assets_supplied.len();
     let mut current_count = 1;
-    for borrowed_reserve in assets_borrowed.clone()
+    for borrowed_reserve in assets_borrowed
+        .clone()
         .iter()
         .filter(|r| r.scaledVariableDebt > U256::from(0))
     {
-        for supplied_reserve in assets_supplied.clone()
+        for supplied_reserve in assets_supplied
+            .clone()
             .iter()
             .filter(|r| r.scaledATokenBalance > U256::from(0) && r.usageAsCollateralEnabledOnUser)
         {
-            let borrowed_symbol = reserves_configuration.get(&borrowed_reserve.underlyingAsset).unwrap().symbol.clone();
-            let supplied_symbol = reserves_configuration.get(&supplied_reserve.underlyingAsset).unwrap().symbol.clone();
-            println!("\t{}/{}) {} -> {}", current_count, total_combinations, borrowed_symbol, supplied_symbol);
+            let borrowed_symbol = reserves_configuration
+                .get(&borrowed_reserve.underlyingAsset)
+                .unwrap()
+                .symbol
+                .clone();
+            let supplied_symbol = reserves_configuration
+                .get(&supplied_reserve.underlyingAsset)
+                .unwrap()
+                .symbol
+                .clone();
+            println!(
+                "\t{}/{}) {} -> {}",
+                current_count, total_combinations, borrowed_symbol, supplied_symbol
+            );
 
             // This is what _calculateDebt() over at LiquidationLogic is supposed to do
-            let actual_debt_to_liquidate =
-            percent_mul(borrowed_reserve.scaledVariableDebt, liquidation_close_factor);
+            let actual_debt_to_liquidate = percent_mul(
+                borrowed_reserve.scaledVariableDebt,
+                liquidation_close_factor,
+            );
 
             // The following is what _calculateAvailableCollateralToLiquidate() over at LiquidationLogic is supposed to do
             let (
@@ -578,7 +686,8 @@ async fn main() {
                 reserves_configuration.clone(),
                 liquidation_close_factor,
                 actual_debt_to_liquidate,
-            ).await;
+            )
+            .await;
 
             current_count += 1;
         }
