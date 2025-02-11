@@ -50,6 +50,16 @@ sol!(
     "src/abis/aave_protocol_data_provider.json"
 );
 
+#[derive(Debug)]
+struct BestPair {
+    collateral_asset: Address,
+    debt_asset: Address,
+    net_profit: U256,
+    actual_collateral_to_liquidate: U256,
+    actual_debt_to_liquidate: U256,
+    liquidation_protocol_fee_amount: U256,
+}
+
 #[derive(Debug, Clone)]
 struct ReserveConfigurationEnhancedData {
     symbol: String,
@@ -524,8 +534,8 @@ async fn calculate_pair_profitability(
     // In order to calculate net profit, everthing must be denominated in collateral units
     // otherwise it will return garbage
     let debt_in_collateral_units =
-        (actual_debt_to_liquidate * debt_asset_price * U256::from(collateral_asset_decimals))
-            / (collateral_asset_price * U256::from(debt_asset_decimals));
+        (actual_debt_to_liquidate * debt_asset_price * collateral_asset_unit)
+            / (collateral_asset_price * debt_asset_unit);
 
     // THIS IS WHAT WE MUST OPTIMIZE FOR
     let net_profit = actual_collateral_to_liquidate - debt_in_collateral_units;
@@ -642,6 +652,7 @@ async fn main() {
     println!("\n### Liquidation path analysis ###");
 
     // Start iterating over available pairs
+    let mut best_pair: Option<BestPair> = None;
     let total_combinations = assets_borrowed.len() * assets_supplied.len();
     let mut current_count = 1;
     for borrowed_reserve in assets_borrowed
@@ -691,12 +702,30 @@ async fn main() {
             )
             .await;
 
-            /*
-            TODO(Hernan): add code to capture the pair with highest net profit, and then output all variables
-                          required to perform the liquidationCall()
-            */
+            if net_profit > best_pair.as_ref().map_or(U256::ZERO, |p| p.net_profit) {
+                best_pair = Some(BestPair {
+                    collateral_asset: supplied_reserve.underlyingAsset,
+                    debt_asset: borrowed_reserve.underlyingAsset,
+                    net_profit,
+                    actual_collateral_to_liquidate,
+                    actual_debt_to_liquidate,
+                    liquidation_protocol_fee_amount,
+                });
+            }
 
             current_count += 1;
         }
     }
+
+    println!("\n### Most profitable liquidation opportunity ###");
+    if let Some(best) = best_pair {
+        println!("\tliquidationCall(");
+        println!("\t\tcollateralAsset = {}, # {}", best.collateral_asset, reserves_configuration.get(&best.collateral_asset).unwrap().symbol);
+        println!("\t\tdebtAsset = {}, # {}", best.debt_asset, reserves_configuration.get(&best.debt_asset).unwrap().symbol);
+        println!("\t\tuser = {},", user_address);
+        println!("\t\tdebtToCover = {},", best.actual_debt_to_liquidate);
+        println!("\t\treceiveAToken = false,");
+        println!("\t)");
+    }
+
 }
