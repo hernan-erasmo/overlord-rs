@@ -525,9 +525,7 @@ async fn get_best_debt_collateral_pair(
 
                 let collateral_amount: U256;
                 let debt_amount_needed: U256;
-                let mut max_collateral_adjusted = false;
                 if max_collateral_to_liquidate > collateral.scaledATokenBalance {
-                    max_collateral_adjusted = true;
                     collateral_amount = collateral.scaledATokenBalance;
                     debt_amount_needed = percent_div(
                         (collateral_asset_price * collateral_amount * debt_asset_unit)
