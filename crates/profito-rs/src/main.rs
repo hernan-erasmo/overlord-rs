@@ -1,19 +1,21 @@
 use alloy::{
-    primitives::{address, Address, U256},
+    primitives::{address, Address, U256, utils::format_units},
     providers::{IpcConnect, ProviderBuilder, RootProvider},
     pubsub::PubSubFrontend,
     sol,
 };
 use once_cell::sync::OnceCell;
 use overlord_shared_types::UnderwaterUserEvent;
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::Arc,
+    time::Instant,
+};
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use tracing_appender::rolling::{self, Rotation};
 use tracing_subscriber::fmt::{time::LocalTime, writer::BoxMakeWriter};
-use AaveProtocolDataProvider::{
-    getLiquidationProtocolFeeReturn, getReserveConfigurationDataReturn,
-};
+use AaveProtocolDataProvider::getReserveConfigurationDataReturn;
 use IUiPoolDataProviderV3::UserReserveData;
 
 sol!(
@@ -96,10 +98,11 @@ struct DebtCollateralPairInfo {
     debt_asset: Address,
     debt_symbol: String,
     debt_amount: U256,
+    debt_in_collateral_units: U256,
     collateral_asset: Address,
     collateral_symbol: String,
-    collateral_seized: U256,
-    net_profit: U256,
+    collateral_amount: U256,
+    net_profit: String,
 }
 
 #[derive(Debug, Clone)]
@@ -358,6 +361,76 @@ async fn generate_reserve_details_by_asset(
     Ok(configuration_data)
 }
 
+/*
+
+    BEGINNING PRICE CACHE SECTION
+
+*/
+
+#[derive(Debug, Clone)]
+struct PriceCache {
+    prices: HashMap<String, HashMap<Address, U256>>,
+    trace_order: VecDeque<String>,
+    max_traces: usize,
+}
+
+impl PriceCache {
+    fn new(max_traces: usize) -> Self {
+        Self {
+            prices: HashMap::new(),
+            trace_order: VecDeque::with_capacity(max_traces),
+            max_traces,
+        }
+    }
+
+    async fn get_price(
+        &mut self,
+        reserve: Address,
+        trace_id: String,
+        oracle: AaveOracle::AaveOracleInstance<PubSubFrontend, Arc<RootProvider<PubSubFrontend>>>,
+    ) -> Result<U256, Box<dyn std::error::Error + Send + Sync>> {
+        // Check if price exists for this trace_id
+        if let Some(prices) = self.prices.get(&trace_id) {
+            if let Some(&price) = prices.get(&reserve) {
+                return Ok(price);
+            }
+        }
+
+        // Fetch new price
+        let price: U256;
+        match oracle.getAssetPrice(reserve).call().await {
+            Ok(price_response) => {
+                price = price_response._0;
+            }
+            Err(e) => return Err(format!("Couldn't fetch price for {}: {}", reserve, e).into()),
+        };
+
+        // Add new trace_id if not exists
+        if !self.prices.contains_key(&trace_id) {
+            if self.trace_order.len() >= self.max_traces {
+                if let Some(oldest_trace) = self.trace_order.pop_front() {
+                    self.prices.remove(&oldest_trace);
+                }
+            }
+            self.trace_order.push_back(trace_id.clone());
+            self.prices.insert(trace_id.clone(), HashMap::new());
+        }
+
+        // Update price
+        if let Some(prices) = self.prices.get_mut(&trace_id) {
+            prices.insert(reserve, price);
+        }
+
+        Ok(price)
+    }
+}
+
+/*
+
+    END PRICE CACHE SECTION
+
+*/
+
 /// This mimics `percentMul` at
 /// https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/math/PercentageMath.sol#L25
 fn percent_mul(value: U256, percentage: U256) -> U256 {
@@ -370,10 +443,14 @@ fn percent_div(value: U256, percentage: U256) -> U256 {
     ((value * U256::from(1e4)) + (percentage / U256::from(2))) / percentage
 }
 
-fn get_best_debt_collateral_pair(
+async fn get_best_debt_collateral_pair(
+    candidate: Address,
     reserves_configuration: ReserveConfigurationData,
     user_reserve_data: Vec<UserReserveData>,
     user_health_factor: U256,
+    price_cache: Arc<tokio::sync::Mutex<PriceCache>>,
+    trace_id: String,
+    oracle: AaveOracle::AaveOracleInstance<PubSubFrontend, Arc<RootProvider<PubSubFrontend>>>,
 ) -> Option<DebtCollateralPairInfo> {
     let mut best_pair: Option<DebtCollateralPairInfo> = None;
     let mut max_net_profit = U256::from(0);
@@ -404,11 +481,34 @@ fn get_best_debt_collateral_pair(
                 let actual_debt_to_liquidate =
                     percent_mul(reserve.scaledVariableDebt, liquidation_close_factor);
 
-                let collateral_asset_price: U256;
-                let debt_asset_price: U256;
+                let collateral_asset_price = match price_cache
+                    .lock()
+                    .await
+                    .get_price(collateral.underlyingAsset, trace_id.clone(), oracle.clone())
+                    .await
+                {
+                    Ok(price) => price,
+                    Err(e) => {
+                        warn!("Failed to get collateral price: {}", e);
+                        return None;
+                    }
+                };
 
-                let collateral_decimals = collateral_config.data.decimals;
-                let debt_decimals = debt_config.data.decimals;
+                let debt_asset_price = match price_cache
+                    .lock()
+                    .await
+                    .get_price(reserve.underlyingAsset, trace_id.clone(), oracle.clone())
+                    .await
+                {
+                    Ok(price) => price,
+                    Err(e) => {
+                        warn!("Failed to get debt price: {}", e);
+                        return None;
+                    }
+                };
+
+                let collateral_decimals = collateral_config.data.decimals.to::<u8>();
+                let debt_decimals = debt_config.data.decimals.to::<u8>();
 
                 let collateral_asset_unit = U256::from(10).pow(U256::from(collateral_decimals));
                 let debt_asset_unit = U256::from(10).pow(U256::from(debt_decimals));
@@ -425,7 +525,9 @@ fn get_best_debt_collateral_pair(
 
                 let collateral_amount: U256;
                 let debt_amount_needed: U256;
+                let mut max_collateral_adjusted = false;
                 if max_collateral_to_liquidate > collateral.scaledATokenBalance {
+                    max_collateral_adjusted = true;
                     collateral_amount = collateral.scaledATokenBalance;
                     debt_amount_needed = percent_div(
                         (collateral_asset_price * collateral_amount * debt_asset_unit)
@@ -437,9 +539,9 @@ fn get_best_debt_collateral_pair(
                     debt_amount_needed = actual_debt_to_liquidate;
                 }
 
-                let bonus_collateral: U256;
-                let mut liquidation_fee = U256::from(0);
-                if collateral_config.liquidation_fee != U256::from(0) {
+                let mut bonus_collateral = U256::ZERO;
+                let mut liquidation_fee = U256::ZERO;
+                if collateral_config.liquidation_fee != U256::ZERO {
                     bonus_collateral = collateral_amount
                         - percent_div(collateral_amount, collateral_config.data.liquidationBonus);
                     liquidation_fee =
@@ -450,31 +552,34 @@ fn get_best_debt_collateral_pair(
                     Now, at this point, we already know the values of everything returned by _calculateAvailableCollateralToLiquidate(),
 
                     (
-                        actualCollateralToLiquidate,  # in this code, this is collateral_amount - liquidation_protocol_fee
+                        actualCollateralToLiquidate,  # collateral_amount - liquidation_protocol_fee
                         actualDebtToLiquidate,        # in this code, this is debt_amount_needed
                         liquidationProtocolFeeAmount  # in this code, this is liquidation_fee
                     )
                 */
-                info!(
-                    "Debt: {}, Collateral: {}, Collateral Seized: {}, Net Profit: {}",
-                    debt_amount_needed,
-                    collateral_amount,
-                    collateral_amount - liquidation_fee,
-                    collateral_amount - liquidation_fee - debt_amount_needed
-                );
-                let net_profit = (collateral_amount * collateral_asset_price)
-                    - debt_amount_needed
-                    - liquidation_fee;
+
+                let actual_collateral_to_liquidate = collateral_amount - liquidation_fee;
+
+                // These aren't relevant to AAVE, that's why you won't find anything on them in Aave code
+                // In order to calculate net profit, everthing must be denominated in collateral units
+                // otherwise it will return garbage
+                let debt_in_collateral_units =
+                (actual_debt_to_liquidate * debt_asset_price * collateral_asset_unit)
+                    / (collateral_asset_price * debt_asset_unit);
+
+                // THIS IS WHAT WE MUST OPTIMIZE FOR
+                let net_profit = actual_collateral_to_liquidate - debt_in_collateral_units;
                 if net_profit > max_net_profit {
                     max_net_profit = net_profit;
                     best_pair = Some(DebtCollateralPairInfo {
                         debt_asset: reserve.underlyingAsset,
                         debt_symbol: debt_symbol.clone(),
                         debt_amount: debt_amount_needed,
-                        collateral_asset: collateral.underlyingAsset,
+                        debt_in_collateral_units,
                         collateral_symbol: collateral_symbol.clone(),
-                        collateral_seized: collateral_amount,
-                        net_profit,
+                        collateral_amount,
+                        collateral_asset: collateral.underlyingAsset,
+                        net_profit: format_units(net_profit, collateral_decimals).unwrap(),
                     });
                 }
             }
@@ -514,6 +619,7 @@ async fn process_uw_event(
     uw_event: UnderwaterUserEvent,
     reserves_configuration: ReserveConfigurationData,
     provider_cache: Arc<ProviderCache>,
+    price_cache: Arc<tokio::sync::Mutex<PriceCache>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let process_uw_event_timer = Instant::now();
     match provider_cache.get_provider().await {
@@ -534,24 +640,22 @@ async fn process_uw_event(
             {
                 Ok(user_reserves_data) => {
                     if let Some(best_pair) = get_best_debt_collateral_pair(
+                        uw_event.address,
                         reserves_configuration,
                         user_reserves_data._0,
                         uw_event.user_account_data.healthFactor,
-                    ) {
-                        /*
+                        price_cache,
+                        uw_event.trace_id,
+                        aave_oracle.clone(),
+                    )
+                    .await
+                    {
                         info!(
-                            "opportunity analysis for {}: repay {} {} to get raw/net {}/{} {} ({}/{} USD) as reward - {:?}ms",
+                            "opportunity analysis for {}: highest profit before TX fees ${} - ({:?})",
                             uw_event.address,
-                            convert_eth_to_asset(aave_oracle.clone(), best_pair.debt_asset, best_pair.debt_amount).await.unwrap(),
-                            best_pair.debt_symbol,
-                            best_pair.collateral_seized,
                             best_pair.net_profit,
-                            best_pair.collateral_symbol,
-                            convert_eth_to_asset(aave_oracle.clone(), best_pair.collateral_asset, best_pair.collateral_seized).await.unwrap(),
-                            convert_eth_to_asset(aave_oracle.clone(), best_pair.collateral_asset, best_pair.net_profit).await.unwrap(),
                             process_uw_event_timer.elapsed(),
                         );
-                         */
                     } else {
                         warn!(
                             "No profitable liquidation pair found for {}",
@@ -590,15 +694,22 @@ async fn main() {
             error!("Failed to initialize reserve configuration: {}", e);
             std::process::exit(1);
         });
+    let price_cache = Arc::new(Mutex::new(PriceCache::new(3)));
     loop {
         match socket.recv_bytes(0) {
             Ok(bytes) => match bincode::deserialize::<UnderwaterUserEvent>(&bytes) {
                 Ok(uw_event) => {
-                    let provider_cache = provider_cache.clone();
                     let reserves_configuration = reserves_configuration.clone();
+                    let provider_cache = provider_cache.clone();
+                    let price_cache = price_cache.clone();
                     tokio::spawn(async move {
-                        if let Err(e) =
-                            process_uw_event(uw_event, reserves_configuration, provider_cache).await
+                        if let Err(e) = process_uw_event(
+                            uw_event,
+                            reserves_configuration,
+                            provider_cache,
+                            price_cache,
+                        )
+                        .await
                         {
                             warn!("Failed to process underwater event: {e}");
                         }
