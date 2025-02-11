@@ -409,6 +409,7 @@ impl PriceCache {
         if !self.prices.contains_key(&trace_id) {
             if self.trace_order.len() >= self.max_traces {
                 if let Some(oldest_trace) = self.trace_order.pop_front() {
+                    info!("Dropping prices cached for {}", oldest_trace);
                     self.prices.remove(&oldest_trace);
                 }
             }
