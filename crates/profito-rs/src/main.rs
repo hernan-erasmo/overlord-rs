@@ -651,14 +651,15 @@ async fn process_uw_event(
                         user_reserves_data._0,
                         uw_event.user_account_data.healthFactor,
                         price_cache,
-                        uw_event.trace_id,
+                        uw_event.trace_id.clone(),
                         aave_oracle.clone(),
                     )
                     .await
                     {
                         info!(
-                            "opportunity analysis for {}: highest profit before TX fees ${} - ({:?})",
+                            "opportunity analysis for {} @ {}: highest profit before TX fees ${} - ({:?})",
                             uw_event.address,
+                            uw_event.trace_id.clone(),
                             best_pair.net_profit,
                             process_uw_event_timer.elapsed(),
                         );
