@@ -324,6 +324,12 @@ async fn get_user_health_factor(provider: RootProvider<PubSubFrontend>, user: Ad
     health_factor
 }
 
+/// This mimics `percentMul` at
+/// https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/math/PercentageMath.sol#L25
+fn percent_mul(value: U256, percentage: U256) -> U256 {
+    (value * percentage + U256::from(0.5e4)) / U256::from(1e4)
+}
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = env::args().collect();
@@ -336,23 +342,30 @@ async fn main() {
     let user_address: Address = args[1].parse().expect("Invalid address format");
 
     println!("Received address: {:?}", user_address);
-    
+
     // Setup provider
     let ipc = IpcConnect::new("/tmp/reth.ipc".to_string());
     let provider = ProviderBuilder::new().on_ipc(ipc).await.unwrap();
-    
+
     // Get user reserves data
     let user_reserves_data = get_user_reserves_data(provider.clone(), user_address).await;
-    
+
     // Create reserve configuration struct
     let reserves_configuration = generate_reserve_details_by_asset(provider.clone(), user_reserves_data.clone()).await;
     let assets_borrowed = user_reserves_data.iter().filter(|reserve| { reserve.scaledVariableDebt > U256::ZERO }).cloned().collect::<Vec<UserReserveData>>();
     let assets_supplied = user_reserves_data.iter().filter(|reserve| { reserve.usageAsCollateralEnabledOnUser && reserve.scaledATokenBalance > U256::ZERO }).cloned().collect::<Vec<UserReserveData>>();
 
-    // Print user health factor
+    // Fetch user health factor
     let user_health_factor = get_user_health_factor(provider.clone(), user_address).await;
     println!("\n### User HF ###");
     println!("\t {}", format_units(user_health_factor, "eth").unwrap());
+
+    let liquidation_close_factor: U256;
+    if user_health_factor <= U256::from(0.95e18) {
+        liquidation_close_factor = U256::from(1e4);
+    } else {
+        liquidation_close_factor = U256::from(0.5e4);
+    };
 
     // Print user reserves data
     println!("\n### User DEBT ###");
@@ -396,6 +409,19 @@ async fn main() {
             let supplied_symbol = reserves_configuration.get(&supplied_reserve.underlyingAsset).unwrap().symbol.clone();
             println!("\t{}/{}) {} -> {}", current_count, total_combinations, supplied_symbol, borrowed_symbol);
 
+            // This is what _calculateDebt() over at LiquidationLogic is supposed to do
+            let actual_debt_to_liquidate =
+            percent_mul(borrowed_reserve.scaledVariableDebt, liquidation_close_factor);
+            println!(
+                "\t\t actual debt to liquidate (debt x liquidation factor) ({} x {}) = {}",
+                borrowed_reserve.scaledVariableDebt,
+                format_units(liquidation_close_factor, 4).unwrap(),
+                actual_debt_to_liquidate,
+            );
+
+            // This is what _calculateAvailableCollateralToLiquidate() over at LiquidationLogic is supposed to do
+            let collateral_asset_price: U256;
+            let debt_asset_price: U256;
             current_count += 1;
         }
     }
