@@ -478,7 +478,7 @@ async fn get_best_debt_collateral_pair(
                 };
 
                 // https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/logic/LiquidationLogic.sol#L379
-                let actual_debt_to_liquidate =
+                let mut actual_debt_to_liquidate =
                     percent_mul(borrowed_reserve.scaledVariableDebt, liquidation_close_factor);
 
                 let collateral_asset_price = match price_cache
@@ -507,14 +507,13 @@ async fn get_best_debt_collateral_pair(
                     }
                 };
 
-                let collateral_decimals = collateral_config.data.decimals.to::<u8>();
-                let debt_decimals = debt_config.data.decimals.to::<u8>();
+                let debt_asset_decimals = debt_config.data.decimals.to::<u8>();
+                let collateral_asset_decimals = collateral_config.data.decimals.to::<u8>();
 
-                let collateral_asset_unit = U256::from(10).pow(U256::from(collateral_decimals));
-                let debt_asset_unit = U256::from(10).pow(U256::from(debt_decimals));
+                let debt_asset_unit = U256::from(10).pow(U256::from(debt_asset_decimals));
+                let collateral_asset_unit = U256::from(10).pow(U256::from(collateral_asset_decimals));
 
-                let base_collateral =
-                    (debt_asset_price * actual_debt_to_liquidate * collateral_asset_unit)
+                let base_collateral = (debt_asset_price * actual_debt_to_liquidate * collateral_asset_unit)
                         / (collateral_asset_price * debt_asset_unit);
                 // Yes, the liquidation bonus considered here is an attribute of the collateral asset. The following traces from here
                 // https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/logic/LiquidationLogic.sol#L498
@@ -524,20 +523,18 @@ async fn get_best_debt_collateral_pair(
                     percent_mul(base_collateral, collateral_config.data.liquidationBonus);
 
                 let collateral_amount: U256;
-                let debt_amount_needed: U256;
                 if max_collateral_to_liquidate > supplied_reserve.scaledATokenBalance {
                     collateral_amount = supplied_reserve.scaledATokenBalance;
-                    debt_amount_needed = percent_div(
+                    actual_debt_to_liquidate = percent_div(
                         (collateral_asset_price * collateral_amount * debt_asset_unit)
                             / (debt_asset_price * collateral_asset_unit),
                         collateral_config.data.liquidationBonus,
                     );
                 } else {
                     collateral_amount = max_collateral_to_liquidate;
-                    debt_amount_needed = actual_debt_to_liquidate;
                 }
 
-                let mut bonus_collateral = U256::ZERO;
+                let bonus_collateral;
                 let mut liquidation_fee = U256::ZERO;
                 if collateral_config.liquidation_fee != U256::ZERO {
                     bonus_collateral = collateral_amount
@@ -565,6 +562,16 @@ async fn get_best_debt_collateral_pair(
                 (actual_debt_to_liquidate * debt_asset_price * collateral_asset_unit)
                     / (collateral_asset_price * debt_asset_unit);
 
+                if collateral_amount < liquidation_fee + debt_in_collateral_units {
+                    warn!(
+                        "net profit for liquidation of user {} would've overflowed (debt {}/ collateral {})",
+                        candidate,
+                        debt_symbol,
+                        collateral_symbol,
+                    );
+                    continue;
+                }
+
                 // THIS IS WHAT WE MUST OPTIMIZE FOR
                 let net_profit = actual_collateral_to_liquidate - debt_in_collateral_units;
                 if net_profit > max_net_profit {
@@ -572,12 +579,12 @@ async fn get_best_debt_collateral_pair(
                     best_pair = Some(DebtCollateralPairInfo {
                         debt_asset: borrowed_reserve.underlyingAsset,
                         debt_symbol: debt_symbol.clone(),
-                        debt_amount: debt_amount_needed,
+                        debt_amount: actual_debt_to_liquidate,
                         debt_in_collateral_units,
                         collateral_symbol: collateral_symbol.clone(),
                         collateral_amount,
                         collateral_asset: supplied_reserve.underlyingAsset,
-                        net_profit: format_units(net_profit, collateral_decimals).unwrap(),
+                        net_profit: format_units(net_profit, collateral_asset_decimals).unwrap(),
                     });
                 }
             }

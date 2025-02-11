@@ -458,7 +458,6 @@ async fn calculate_pair_profitability(
         );
     } else {
         collateral_amount = max_collateral_to_liquidate;
-        actual_debt_to_liquidate = actual_debt_to_liquidate;
     }
 
     if max_collateral_to_liquidate > supplied_reserve.scaledATokenBalance {
@@ -490,8 +489,8 @@ async fn calculate_pair_profitability(
     // `amount_debt_to_liquidate` contains the valid maximum amount of debt to repay.
 
     let mut bonus_collateral = U256::ZERO;
-    let mut liquidation_fee = U256::from(0);
-    if collateral_config.liquidation_fee != U256::from(0) {
+    let mut liquidation_fee = U256::ZERO;
+    if collateral_config.liquidation_fee != U256::ZERO {
         bonus_collateral = collateral_amount
             - percent_div(collateral_amount, collateral_config.data.liquidationBonus);
         liquidation_fee = percent_mul(bonus_collateral, collateral_config.liquidation_fee);
@@ -524,6 +523,10 @@ async fn calculate_pair_profitability(
     let debt_in_collateral_units =
         (actual_debt_to_liquidate * debt_asset_price * collateral_asset_unit)
             / (collateral_asset_price * debt_asset_unit);
+    println!("\t\tdebt in collateral units:");
+    println!("\t\t\t{} x {} x {}", actual_debt_to_liquidate, debt_asset_price, collateral_asset_unit);
+    println!("\t\t\t-------------------------------------------------");
+    println!("\t\t\t{} x {}", collateral_asset_price, debt_asset_unit);
 
     // THIS IS WHAT WE MUST OPTIMIZE FOR
     let net_profit = actual_collateral_to_liquidate - debt_in_collateral_units;
