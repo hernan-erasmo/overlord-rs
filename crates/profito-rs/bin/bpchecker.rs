@@ -29,7 +29,6 @@ mod ui {
     );
 }
 
-use pool::AaveV3Pool;
 use ui::AaveUIPoolDataProvider;
 use ui::IUiPoolDataProviderV3::UserReserveData;
 
@@ -354,13 +353,12 @@ async fn calculate_pair_profitability(
     liquidation_close_factor: U256,
     mut actual_debt_to_liquidate: U256,
 ) -> (U256, U256, U256, U256) {
+    let debt_config = reserves_configuration
+        .get(&borrowed_reserve.underlyingAsset)
+        .unwrap();
     let collateral_config = reserves_configuration
         .get(&supplied_reserve.underlyingAsset)
         .unwrap();
-    let debt_config = reserves_configuration
-        .get(&supplied_reserve.underlyingAsset)
-        .unwrap();
-    let actual_collateral_to_liquidate = U256::ZERO;
     let liquidation_protocol_fee_amount = U256::ZERO;
     let collateral_asset_price: U256;
     let debt_asset_price: U256;
@@ -403,18 +401,8 @@ async fn calculate_pair_profitability(
         format_units(collateral_asset_price, 8).unwrap()
     );
 
-    let debt_asset_decimals = reserves_configuration
-        .get(&borrowed_reserve.underlyingAsset)
-        .unwrap()
-        .data
-        .decimals
-        .to::<u8>();
-    let collateral_asset_decimals = reserves_configuration
-        .get(&supplied_reserve.underlyingAsset)
-        .unwrap()
-        .data
-        .decimals
-        .to::<u8>();
+    let debt_asset_decimals = debt_config.data.decimals.to::<u8>();
+    let collateral_asset_decimals = collateral_config.data.decimals.to::<u8>();
 
     let debt_asset_unit = U256::from(10).pow(U256::from(debt_asset_decimals));
     let collateral_asset_unit = U256::from(10).pow(U256::from(collateral_asset_decimals));

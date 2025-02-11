@@ -455,17 +455,17 @@ async fn get_best_debt_collateral_pair(
     let mut best_pair: Option<DebtCollateralPairInfo> = None;
     let mut max_net_profit = U256::from(0);
     let mut liquidation_close_factor;
-    for reserve in user_reserve_data
+    for borrowed_reserve in user_reserve_data
         .iter()
-        .filter(|r| r.scaledVariableDebt > U256::from(0))
+        .filter(|r| r.scaledVariableDebt > U256::ZERO)
     {
-        for collateral in user_reserve_data
+        for supplied_reserve in user_reserve_data
             .iter()
-            .filter(|r| r.scaledATokenBalance > U256::from(0) && r.usageAsCollateralEnabledOnUser)
+            .filter(|r| r.usageAsCollateralEnabledOnUser && r.scaledATokenBalance > U256::ZERO)
         {
             if let (Some(debt_config), Some(collateral_config)) = (
-                reserves_configuration.get(&reserve.underlyingAsset),
-                reserves_configuration.get(&collateral.underlyingAsset),
+                reserves_configuration.get(&borrowed_reserve.underlyingAsset),
+                reserves_configuration.get(&supplied_reserve.underlyingAsset),
             ) {
                 let debt_symbol = &debt_config.symbol;
                 let collateral_symbol = &collateral_config.symbol;
@@ -479,12 +479,12 @@ async fn get_best_debt_collateral_pair(
 
                 // https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/logic/LiquidationLogic.sol#L379
                 let actual_debt_to_liquidate =
-                    percent_mul(reserve.scaledVariableDebt, liquidation_close_factor);
+                    percent_mul(borrowed_reserve.scaledVariableDebt, liquidation_close_factor);
 
                 let collateral_asset_price = match price_cache
                     .lock()
                     .await
-                    .get_price(collateral.underlyingAsset, trace_id.clone(), oracle.clone())
+                    .get_price(supplied_reserve.underlyingAsset, trace_id.clone(), oracle.clone())
                     .await
                 {
                     Ok(price) => price,
@@ -497,7 +497,7 @@ async fn get_best_debt_collateral_pair(
                 let debt_asset_price = match price_cache
                     .lock()
                     .await
-                    .get_price(reserve.underlyingAsset, trace_id.clone(), oracle.clone())
+                    .get_price(borrowed_reserve.underlyingAsset, trace_id.clone(), oracle.clone())
                     .await
                 {
                     Ok(price) => price,
@@ -525,8 +525,8 @@ async fn get_best_debt_collateral_pair(
 
                 let collateral_amount: U256;
                 let debt_amount_needed: U256;
-                if max_collateral_to_liquidate > collateral.scaledATokenBalance {
-                    collateral_amount = collateral.scaledATokenBalance;
+                if max_collateral_to_liquidate > supplied_reserve.scaledATokenBalance {
+                    collateral_amount = supplied_reserve.scaledATokenBalance;
                     debt_amount_needed = percent_div(
                         (collateral_asset_price * collateral_amount * debt_asset_unit)
                             / (debt_asset_price * collateral_asset_unit),
@@ -570,13 +570,13 @@ async fn get_best_debt_collateral_pair(
                 if net_profit > max_net_profit {
                     max_net_profit = net_profit;
                     best_pair = Some(DebtCollateralPairInfo {
-                        debt_asset: reserve.underlyingAsset,
+                        debt_asset: borrowed_reserve.underlyingAsset,
                         debt_symbol: debt_symbol.clone(),
                         debt_amount: debt_amount_needed,
                         debt_in_collateral_units,
                         collateral_symbol: collateral_symbol.clone(),
                         collateral_amount,
-                        collateral_asset: collateral.underlyingAsset,
+                        collateral_asset: supplied_reserve.underlyingAsset,
                         net_profit: format_units(net_profit, collateral_decimals).unwrap(),
                     });
                 }
