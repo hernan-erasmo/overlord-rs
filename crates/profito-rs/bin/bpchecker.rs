@@ -330,13 +330,19 @@ fn percent_mul(value: U256, percentage: U256) -> U256 {
     (value * percentage + U256::from(0.5e4)) / U256::from(1e4)
 }
 
+/// This mimics `percentDiv` at
+/// https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/math/PercentageMath.sol#L48
+fn percent_div(value: U256, percentage: U256) -> U256 {
+    ((value * U256::from(1e4)) + (percentage / U256::from(2))) / percentage
+}
+
 async fn calculate_pair_profitability(
     provider: RootProvider<PubSubFrontend>,
     borrowed_reserve: UserReserveData,
     supplied_reserve: UserReserveData,
     reserves_configuration: HashMap<Address, ReserveConfigurationEnhancedData>,
     liquidation_close_factor: U256,
-    actual_debt_to_liquidate: U256,
+    mut actual_debt_to_liquidate: U256,
 ) -> (U256, U256, U256) {
     let collateral_config = reserves_configuration.get(&supplied_reserve.underlyingAsset).unwrap();
     let debt_config = reserves_configuration.get(&supplied_reserve.underlyingAsset).unwrap();
@@ -393,12 +399,87 @@ async fn calculate_pair_profitability(
     let max_collateral_to_liquidate =
     percent_mul(base_collateral, collateral_config.data.liquidationBonus);
     println!(
-        "\t\tmax collateral to liquidate = {} ({}) ($ {})",
+        "\t\tmax collateral to liquidate ({}% of base collateral) = {} ($ {})",
+        format_units(collateral_config.data.liquidationBonus, 2).unwrap(),
         max_collateral_to_liquidate,
-        format_units(max_collateral_to_liquidate, collateral_asset_decimals).unwrap(),
         format_units(max_collateral_to_liquidate * collateral_asset_price, collateral_asset_decimals + 8).unwrap(),
     );
 
+    // Just the same as LiquidationLogic does, we need to make sure the user has enough
+    // collateral to cover max_collateral_to_liquidate. If not, then we need to adjust
+    // the amount of debt to liquidate accordingly.
+    let collateral_amount: U256;
+    if max_collateral_to_liquidate > supplied_reserve.scaledATokenBalance {
+        collateral_amount = supplied_reserve.scaledATokenBalance;
+        actual_debt_to_liquidate = percent_div(
+            (collateral_asset_price * collateral_amount * debt_asset_unit)
+                / (debt_asset_price * collateral_asset_unit),
+            collateral_config.data.liquidationBonus,
+        );
+    } else {
+        collateral_amount = max_collateral_to_liquidate;
+        actual_debt_to_liquidate = actual_debt_to_liquidate;
+    }
+
+    if max_collateral_to_liquidate > supplied_reserve.scaledATokenBalance {
+        println!("\t\tNOT ENOUGH COLLATERAL TO DEDUCT MAX");
+        println!(
+            "\t\t\tnew debt to liquidate = ({}) ({} units) ($ {})",
+            actual_debt_to_liquidate,
+            format_units(actual_debt_to_liquidate, debt_asset_decimals).unwrap(),
+            format_units(actual_debt_to_liquidate * debt_asset_price, debt_asset_decimals + 8).unwrap(),
+        );
+        println!(
+            "\t\t\tnew collateral to liquidate = ({}) ({} units) ($ {})",
+            collateral_amount,
+            format_units(collateral_amount, collateral_asset_decimals).unwrap(),
+            format_units(collateral_amount * collateral_asset_price, collateral_asset_decimals + 8).unwrap(),
+        );
+    }
+
+    // At this point, all sanity checks on debt and collateral amounts to liquidate have passed
+    // `collateral_amount` contains the valid maximum amount to liquidate on this pair, and
+    // `amount_debt_to_liquidate` contains the valid maximum amount of debt to repay.
+
+
+    let mut bonus_collateral = U256::ZERO;
+    let mut liquidation_fee = U256::from(0);
+    if collateral_config.liquidation_fee != U256::from(0) {
+        bonus_collateral = collateral_amount - percent_div(collateral_amount, collateral_config.data.liquidationBonus);
+        liquidation_fee = percent_mul(bonus_collateral, collateral_config.liquidation_fee);
+    }
+    println!(
+        "\t\tbonus collateral (max - base) = {} ($ {})",
+        bonus_collateral,
+        format_units(bonus_collateral * collateral_asset_price, collateral_asset_decimals + 8).unwrap(),
+    );
+    println!(
+        "\t\tliquidation fee ({}% of bonus collateral) = {} ($ {})",
+        format_units(collateral_config.liquidation_fee, 2).unwrap(),
+        liquidation_fee,
+        format_units(liquidation_fee * collateral_asset_price, collateral_asset_decimals + 8).unwrap(),
+    );
+
+    let actual_collateral_to_liquidate = collateral_amount - liquidation_fee;
+
+    // These aren't relevant to AAVE, that's why you won't find anything on them in Aave code
+    // In order to calculate net profit, everthing must be denominated in collateral units
+    // otherwise it will return garbage
+    let debt_in_collateral_units = (actual_debt_to_liquidate * debt_asset_price * U256::from(collateral_asset_decimals)) / (collateral_asset_price * U256::from(debt_asset_decimals));
+    
+    // THIS IS WHAT WE MUST OPTIMIZE FOR
+    let net_profit = actual_collateral_to_liquidate - debt_in_collateral_units;
+
+    println!(
+        "\t\tnet profit (collateral reward - debt repaid - liq fee) ({} - {} - {})\n\t\t\t{} ($ {})",
+        actual_collateral_to_liquidate, // collateral units
+        debt_in_collateral_units, // this ensures debt is in collateral units
+        liquidation_fee, // collateral units
+        net_profit,
+        format_units(net_profit, collateral_asset_decimals).unwrap(),
+    );
+
+    // This is the actual return tuple from _calculateAvailableCollateralToLiquidate()
     (actual_collateral_to_liquidate, actual_debt_to_liquidate, liquidation_protocol_fee_amount)
 }
 
