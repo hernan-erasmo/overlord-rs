@@ -343,7 +343,7 @@ async fn calculate_pair_profitability(
     reserves_configuration: HashMap<Address, ReserveConfigurationEnhancedData>,
     liquidation_close_factor: U256,
     mut actual_debt_to_liquidate: U256,
-) -> (U256, U256, U256) {
+) -> (U256, U256, U256, U256) {
     let collateral_config = reserves_configuration
         .get(&supplied_reserve.underlyingAsset)
         .unwrap();
@@ -541,6 +541,7 @@ async fn calculate_pair_profitability(
 
     // This is the actual return tuple from _calculateAvailableCollateralToLiquidate()
     (
+        net_profit,
         actual_collateral_to_liquidate,
         actual_debt_to_liquidate,
         liquidation_protocol_fee_amount,
@@ -676,6 +677,7 @@ async fn main() {
 
             // The following is what _calculateAvailableCollateralToLiquidate() over at LiquidationLogic is supposed to do
             let (
+                net_profit,
                 actual_collateral_to_liquidate,
                 actual_debt_to_liquidate,
                 liquidation_protocol_fee_amount,
@@ -688,6 +690,11 @@ async fn main() {
                 actual_debt_to_liquidate,
             )
             .await;
+
+            /*
+            TODO(Hernan): add code to capture the pair with highest net profit, and then output all variables
+                          required to perform the liquidationCall()
+            */
 
             current_count += 1;
         }
