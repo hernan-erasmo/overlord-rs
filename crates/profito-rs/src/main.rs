@@ -585,7 +585,7 @@ async fn get_best_debt_collateral_pair(
                         collateral_symbol: collateral_symbol.clone(),
                         collateral_amount,
                         collateral_asset: supplied_reserve.underlyingAsset,
-                        net_profit: format_units(net_profit, collateral_asset_decimals).unwrap(),
+                        net_profit: format_units(net_profit * collateral_asset_price, collateral_asset_decimals + 8).unwrap(),
                     });
                 }
             }
