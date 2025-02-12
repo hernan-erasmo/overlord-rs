@@ -571,10 +571,11 @@ async fn main() {
     let ipc = IpcConnect::new(ipc_path.to_string());
     let provider = ProviderBuilder::new().on_ipc(ipc).await.unwrap();
 
+    let block_number = provider.get_block_number().await.unwrap_or_default();
     println!(
         "Received address: {:?} at block {} (IPC: {})",
         user_address,
-        provider.get_block_number().await.unwrap(),
+        block_number,
         ipc_path.to_string(),
     );
 
