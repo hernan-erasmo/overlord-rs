@@ -1,6 +1,6 @@
 use alloy::{
     primitives::{address, utils::format_units, Address, U256},
-    providers::{IpcConnect, ProviderBuilder, RootProvider},
+    providers::{IpcConnect, Provider, ProviderBuilder, RootProvider},
     pubsub::PubSubFrontend,
     sol,
 };
@@ -516,6 +516,11 @@ async fn calculate_pair_profitability(
     );
 
     let actual_collateral_to_liquidate = collateral_amount - liquidation_fee;
+    println!(
+        "\t\tcollateral to liquidate = {} ($ {})",
+        actual_collateral_to_liquidate,
+        format_units(actual_collateral_to_liquidate * collateral_asset_price, collateral_asset_decimals + 8).unwrap()
+    );
 
     // These aren't relevant to AAVE, that's why you won't find anything on them in Aave code
     // In order to calculate net profit, everthing must be denominated in collateral units
@@ -537,7 +542,7 @@ async fn calculate_pair_profitability(
         debt_in_collateral_units, // this ensures debt is in collateral units
         liquidation_fee, // collateral units
         net_profit,
-        format_units(net_profit, collateral_asset_decimals).unwrap(),
+        format_units(net_profit * collateral_asset_price, collateral_asset_decimals + 8).unwrap(),
     );
 
     // This is the actual return tuple from _calculateAvailableCollateralToLiquidate()
@@ -553,18 +558,25 @@ async fn calculate_pair_profitability(
 async fn main() {
     let args: Vec<String> = env::args().collect();
 
-    if args.len() != 2 {
-        eprintln!("Usage: {} <address>", args[0]);
+    if args.len() <= 2 {
+        eprintln!("Usage: {} <address> [path_to_ipc]", args[0]);
         std::process::exit(1);
     }
 
+    let ipc_path = args.get(2).map_or("/tmp/reth.ipc", |path| path.as_str());
+
     let user_address: Address = args[1].parse().expect("Invalid address format");
 
-    println!("Received address: {:?}", user_address);
-
     // Setup provider
-    let ipc = IpcConnect::new("/tmp/reth.ipc".to_string());
+    let ipc = IpcConnect::new(ipc_path.to_string());
     let provider = ProviderBuilder::new().on_ipc(ipc).await.unwrap();
+
+    println!(
+        "Received address: {:?} at block {} (IPC: {})",
+        user_address,
+        provider.get_block_number().await.unwrap(),
+        ipc_path.to_string(),
+    );
 
     // Get user reserves data
     let user_reserves_data = get_user_reserves_data(provider.clone(), user_address).await;
