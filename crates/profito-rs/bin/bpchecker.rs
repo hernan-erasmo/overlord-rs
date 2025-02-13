@@ -292,21 +292,17 @@ async fn get_user_reserves_data(
 ) -> Vec<UserReserveData> {
     let ui_data =
         AaveUIPoolDataProvider::new(AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, provider.clone());
-    let user_reserves_data: Vec<ui::IUiPoolDataProviderV3::UserReserveData>;
-
-    match ui_data
+    let user_reserves_data = match ui_data
         .getUserReservesData(AAVE_V3_PROVIDER_ADDRESS, user_address)
         .call()
         .await
     {
-        Ok(user_reserves) => {
-            user_reserves_data = user_reserves._0;
-        }
+        Ok(user_reserves) => user_reserves._0,
         Err(e) => {
             eprintln!("Error trying to call AaveUIPoolDataProvider: {}", e);
             std::process::exit(1);
         }
-    }
+    };
     user_reserves_data
         .iter()
         .filter(|reserve| {
@@ -320,17 +316,13 @@ async fn get_user_reserves_data(
 
 async fn get_user_health_factor(provider: RootProvider<PubSubFrontend>, user: Address) -> U256 {
     let pool = pool::AaveV3Pool::new(AAVE_V3_POOL_ADDRESS, provider.clone());
-    let health_factor: U256;
     match pool.getUserAccountData(user).call().await {
-        Ok(account_data) => {
-            health_factor = account_data.healthFactor;
-        }
+        Ok(account_data) => account_data.healthFactor,
         Err(e) => {
             eprintln!("Error trying to call getUserAccountData: {}", e);
             std::process::exit(1);
         }
     }
-    health_factor
 }
 
 /// This mimics `percentMul` at
@@ -360,31 +352,25 @@ async fn calculate_pair_profitability(
         .get(&supplied_reserve.underlyingAsset)
         .unwrap();
     let liquidation_protocol_fee_amount = U256::ZERO;
-    let collateral_asset_price: U256;
-    let debt_asset_price: U256;
     let aave_oracle: AaveOracle::AaveOracleInstance<PubSubFrontend, RootProvider<PubSubFrontend>> =
         AaveOracle::new(AAVE_ORACLE_ADDRESS, provider.clone());
-    match aave_oracle
+    let debt_asset_price = match aave_oracle
         .getAssetPrice(borrowed_reserve.underlyingAsset)
         .call()
         .await
     {
-        Ok(price_response) => {
-            debt_asset_price = price_response._0;
-        }
+        Ok(price_response) => price_response._0,
         Err(e) => {
             eprintln!("Error trying to call getAssetPrice: {}", e);
             std::process::exit(1);
         }
     };
-    match aave_oracle
+    let collateral_asset_price = match aave_oracle
         .getAssetPrice(supplied_reserve.underlyingAsset)
         .call()
         .await
     {
-        Ok(price_response) => {
-            collateral_asset_price = price_response._0;
-        }
+        Ok(price_response) => price_response._0,
         Err(e) => {
             eprintln!("Error trying to call getAssetPrice: {}", e);
             std::process::exit(1);
@@ -581,9 +567,7 @@ async fn main() {
     let block_number = provider.get_block_number().await.unwrap_or_default();
     println!(
         "Received address: {:?} at block {} (IPC: {})",
-        user_address,
-        block_number,
-        ipc_path.to_string(),
+        user_address, block_number, ipc_path,
     );
 
     // Get user reserves data
@@ -610,11 +594,10 @@ async fn main() {
     println!("\n### User HF ###");
     println!("\t {}", format_units(user_health_factor, "eth").unwrap());
 
-    let liquidation_close_factor: U256;
-    if user_health_factor <= U256::from(0.95e18) {
-        liquidation_close_factor = U256::from(1e4);
+    let liquidation_close_factor = if user_health_factor <= U256::from(0.95e18) {
+        U256::from(1e4)
     } else {
-        liquidation_close_factor = U256::from(0.5e4);
+        U256::from(0.5e4)
     };
 
     // Print user reserves data

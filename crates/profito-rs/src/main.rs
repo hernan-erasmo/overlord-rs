@@ -441,11 +441,8 @@ impl PriceCache {
         }
 
         // Fetch new price
-        let price: U256;
-        match oracle.getAssetPrice(reserve).call().await {
-            Ok(price_response) => {
-                price = price_response._0;
-            }
+        let price = match oracle.getAssetPrice(reserve).call().await {
+            Ok(price_response) => price_response._0,
             Err(e) => return Err(format!("Couldn't fetch price for {}: {}", reserve, e).into()),
         };
 
