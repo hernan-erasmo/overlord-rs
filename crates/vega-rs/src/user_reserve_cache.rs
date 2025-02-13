@@ -63,9 +63,9 @@ struct UserReservesCacheInitStats {
 }
 
 #[derive(Debug, Clone)]
-struct AaveReserveInfo {
-    symbol: String,
-    reserve_address: ReserveAddress,
+pub struct AaveReserveInfo {
+    pub symbol: String,
+    pub reserve_address: ReserveAddress,
 }
 
 pub struct UserReservesCache {
@@ -387,9 +387,9 @@ impl UserReservesCache {
     pub async fn get_candidates_for_bundle(
         &mut self,
         bundle: Option<&PriceUpdateBundle>,
-    ) -> Vec<Vec<Address>> {
+    ) -> (Vec<Vec<Address>>, Vec<AaveReserveInfo>) {
         let bundle_processing = Instant::now();
-        let empty_response = vec![vec![]];
+        let empty_response = (vec![vec![]], vec![]);
         if bundle.is_none() {
             return empty_response;
         }
@@ -408,7 +408,7 @@ impl UserReservesCache {
         */
         let mut user_count_for_reserve: HashMap<String, usize> = HashMap::new();
         let cache = self.user_reserves_cache.read().await;
-        for affected_reserve in affected_reserves {
+        for affected_reserve in affected_reserves.clone() {
             if let Some(users_by_position) = cache.get(&affected_reserve.reserve_address) {
                 // Two things are done in the next block:
                 // 1. Populates the `duplicate_candidates` vector. The map() makes two iterations, the first one over
@@ -464,7 +464,7 @@ impl UserReservesCache {
             asset_details = %log_message,
             "Bundle processing complete"
         );
-        candidate_buckets
+        (candidate_buckets, affected_reserves)
     }
 
     /// The forwarded_to address represents the Chainlink address to which the price update was directed to.

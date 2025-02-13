@@ -1,5 +1,5 @@
 use alloy::{
-    primitives::Address,
+    primitives::{Address, U256},
     providers::{IpcConnect, ProviderBuilder},
 };
 use bincode::deserialize;
@@ -51,7 +51,7 @@ async fn run_price_update_pipeline(
     event_bus: Arc<UnderwaterUserEventBus>,
 ) {
     let pipeline_processing = Instant::now();
-    let address_buckets = cache.get_candidates_for_bundle(bundle).await;
+    let (address_buckets, affected_reserves) = cache.get_candidates_for_bundle(bundle).await;
     if address_buckets.len() == 1 && address_buckets[0].is_empty() {
         return;
     }
@@ -62,11 +62,21 @@ async fn run_price_update_pipeline(
             return;
         }
     };
+    let new_prices_by_asset = affected_reserves.iter().map(|r_info| {
+        (
+            r_info.reserve_address,
+            r_info.symbol.clone(),
+            bundle.map_or(U256::ZERO, |b| {
+                b.tx_new_price
+            }),
+        )
+    }).collect::<Vec<(Address, String, U256)>>();
     let trace_id = bundle.map_or("initial-run".to_string(), |b| b.trace_id.clone());
     let results = get_hf_for_users(
         address_buckets,
         fork_provider.fork_provider.as_ref().unwrap(),
         Some(trace_id.clone()),
+        new_prices_by_asset,
         Some(event_bus),
     )
     .await;
@@ -128,7 +138,13 @@ async fn _dump_initial_hf_results(
             return Err(Box::new(e));
         }
     };
-    let init_hf_results = get_hf_for_users(user_buckets, &provider, None, Some(event_bus)).await;
+    let init_hf_results = get_hf_for_users(
+        user_buckets,
+        &provider,
+        None,
+        vec!(),
+        Some(event_bus)
+    ).await;
     let init_hf_results_filepath = format!(
         "{}/init_hf_under_1_results_{}.txt",
         output_data_dir,

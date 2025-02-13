@@ -383,6 +383,50 @@ impl PriceCache {
         }
     }
 
+    /// This function overwrites the current price for a given asset and trace_id.
+    /// Useful for mimicking price calculations based on price update TXs that haven't
+    /// been published yet. Returns true if successful, or false otherwise.
+    async fn override_price(
+        &mut self,
+        trace_id: String,
+        new_prices_by_asset: Vec<(Address, String, U256)>
+    ) -> bool {
+        if new_prices_by_asset.is_empty() {
+            // This means initial-run from vega-rs. No prices to update.
+            return true;
+        }
+        if !self.prices.contains_key(&trace_id) {
+            warn!("No trace_id {} for price override", trace_id);
+            return false;
+        } else {
+            for (reserve, symbol, new_price) in new_prices_by_asset.iter() {
+                let old_price = match self.prices.get(&trace_id).and_then(|p| p.get(reserve)) {
+                    Some(&price) => price,
+                    None => {
+                        warn!("Failed to get old price for asset {} in trace {}", reserve, trace_id);
+                        U256::ZERO
+                    }
+                };
+                if let Some(prices) = self.prices.get_mut(&trace_id) {
+                    prices.insert(*reserve, *new_price);
+                    let old_price_str = if old_price == U256::ZERO {
+                        "INVALID".to_string()
+                    } else {
+                        old_price.to_string()
+                    };
+                    info!(
+                        "Successfully override {} price cache for {}. (old ={}, current={})",
+                        trace_id,
+                        symbol,
+                        old_price_str,
+                        new_price,
+                    );
+                }
+            }
+        }
+        true
+    }
+
     async fn get_price(
         &mut self,
         reserve: Address,
@@ -608,19 +652,6 @@ fn _setup_logging() {
         .init();
 }
 
-pub async fn convert_eth_to_asset(
-    aave_oracle: AaveOracle::AaveOracleInstance<PubSubFrontend, Arc<RootProvider<PubSubFrontend>>>,
-    asset_address: Address,
-    amount_in_eth: U256,
-) -> Result<U256, Box<dyn std::error::Error>> {
-    //TODO(Hernan) These values could be cached and be valid throughout the same trace_id
-    let weth_address = address!("0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2");
-    let eth_price_usd = aave_oracle.getAssetPrice(weth_address).call().await?._0;
-    let asset_price_usd = aave_oracle.getAssetPrice(asset_address).call().await?._0;
-    let amount_in_asset = amount_in_eth * eth_price_usd / asset_price_usd;
-    Ok(amount_in_asset)
-}
-
 async fn process_uw_event(
     uw_event: UnderwaterUserEvent,
     reserves_configuration: ReserveConfigurationData,
@@ -645,6 +676,9 @@ async fn process_uw_event(
                 .await
             {
                 Ok(user_reserves_data) => {
+                    if !price_cache.lock().await.override_price(uw_event.trace_id.clone(), uw_event.new_asset_prices).await {
+                        warn!("Price(s) for uw_event with trace_id {} couldn't be overriden. Next calculations won't consider the pending price update TX values.", uw_event.trace_id);
+                    }
                     if let Some(best_pair) = get_best_debt_collateral_pair(
                         uw_event.address,
                         reserves_configuration,

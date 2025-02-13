@@ -42,6 +42,7 @@ pub async fn get_hf_for_users(
     address_buckets: Vec<Vec<Address>>,
     provider: &RootProvider<PubSubFrontend>,
     trace_id: Option<String>,
+    new_prices_by_asset: Vec<(Address, String, U256)>,
     event_bus: Option<Arc<UnderwaterUserEventBus>>,
 ) -> HealthFactorCalculationResults {
     let mut tasks = vec![];
@@ -53,6 +54,7 @@ pub async fn get_hf_for_users(
     for bucket in address_buckets {
         let pool = pool.clone();
         let event_bus = event_bus.clone();
+        let new_prices_by_asset= new_prices_by_asset.clone();
         let trace_id = trace_id
             .as_ref()
             .map(String::from)
@@ -69,6 +71,7 @@ pub async fn get_hf_for_users(
                                     address,
                                     trace_id: trace_id.clone(),
                                     user_account_data: data.clone(),
+                                    new_asset_prices: new_prices_by_asset.clone(),
                                 });
                             }
                         }
