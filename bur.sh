@@ -17,17 +17,25 @@ trap cleanup EXIT
 # Validate required argument
 if [ -z "$1" ]; then
     echo "Error: User address is required"
-    echo "Usage: $0 <user_address> [block_number]"
+    echo "Usage: $0 <user_address> [block_number] [tx_hash]"
     exit 1
 fi
 
 USER_ADDRESS=$1
+BLOCK_NUMBER=$2
+TX_HASH=$3
 ANVIL_IPC="/tmp/bur_anvil_instance.ipc"
 
+echo "Building project..."
+if ! cargo build --release --workspace > /dev/null 2>&1; then
+    echo "Error: Build failed"
+    exit 1
+fi
+
 # Start anvil with appropriate parameters
-if [ -n "$2" ]; then
-    echo "Starting anvil with block number $2..."
-    anvil --ipc $ANVIL_IPC --fork-url /tmp/reth.ipc --fork-block-number "$2" > /dev/null 2>&1 &
+if [ -n "$BLOCK_NUMBER" ]; then
+    echo "Starting anvil with block number $BLOCK_NUMBER..."
+    anvil --ipc $ANVIL_IPC --fork-url /tmp/reth.ipc --fork-block-number "$BLOCK_NUMBER" > /dev/null 2>&1 &
 else
     echo "Starting anvil at latest block..."
     anvil --ipc $ANVIL_IPC --fork-url /tmp/reth.ipc > /dev/null 2>&1 &
@@ -48,10 +56,43 @@ for i in {1..30}; do
     fi
 done
 
-echo "Building project..."
-if ! cargo build --release --workspace > /dev/null 2>&1; then
-    echo "Error: Build failed"
-    exit 1
+# If tx_hash is provided, validate and replay the transaction
+if [ -n "$TX_HASH" ]; then
+    echo -e "\n# Extracting price update information from TX"
+    PRICE_UPDATE_TX=$TX_HASH
+
+    # Get the block number of the transaction
+    TX_BLOCK_NUMBER=$(cast tx --rpc-url /tmp/reth.ipc $PRICE_UPDATE_TX blockNumber)
+
+    # Validate block number
+    if [ -n "$BLOCK_NUMBER" ] && [ "$BLOCK_NUMBER" -ge "$TX_BLOCK_NUMBER" ]; then
+        echo "Error: Forked at provided block number $BLOCK_NUMBER, but transaction landed at $TX_BLOCK_NUMBER. Anvil should be forked at the block BEFORE the transaction"
+        cleanup
+        exit 1
+    fi
+
+    # Extract transaction details
+    PRICE_UPDATE_TO=$(cast tx --rpc-url /tmp/reth.ipc $PRICE_UPDATE_TX to)
+    PRICE_UPDATE_TX_INPUT=$(cast tx --rpc-url /tmp/reth.ipc $PRICE_UPDATE_TX input)
+    PRICE_UPDATE_FROM=$(cast tx --rpc-url /tmp/reth.ipc $PRICE_UPDATE_TX from)
+
+    # Impersonate account
+    IMPERSONATE_RESULT=$(cast rpc anvil_impersonateAccount $PRICE_UPDATE_FROM --rpc-url $ANVIL_IPC)
+    if [ "$IMPERSONATE_RESULT" != "null" ]; then
+        echo "Error: Failed to impersonate account $PRICE_UPDATE_FROM"
+        cleanup
+        exit 1
+    fi
+
+    # Replay transaction
+    echo "Replaying transaction..."
+    TX_STATUS=$(cast send --json --gas-limit 7000000 --rpc-url $ANVIL_IPC --unlocked --from $PRICE_UPDATE_FROM $PRICE_UPDATE_TO $PRICE_UPDATE_TX_INPUT | jq '.status')
+    if [ "$TX_STATUS" != "\"0x1\"" ]; then
+        echo "Error: Transaction replay failed with status $TX_STATUS"
+        cleanup
+        exit 1
+    fi
+    echo "Transaction replayed successfully"
 fi
 
 echo "Running bpchecker..."
