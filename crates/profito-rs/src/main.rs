@@ -7,7 +7,7 @@ use alloy::{
 use once_cell::sync::OnceCell;
 use overlord_shared_types::UnderwaterUserEvent;
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     sync::Arc,
     time::Instant,
 };
@@ -372,6 +372,7 @@ struct PriceCache {
     prices: HashMap<String, HashMap<Address, U256>>,
     trace_order: VecDeque<String>,
     max_traces: usize,
+    overriden_traces: HashSet<String>,
 }
 
 impl PriceCache {
@@ -380,6 +381,7 @@ impl PriceCache {
             prices: HashMap::new(),
             trace_order: VecDeque::with_capacity(max_traces),
             max_traces,
+            overriden_traces: HashSet::new(),
         }
     }
 
@@ -395,35 +397,47 @@ impl PriceCache {
             // This means initial-run from vega-rs. No prices to update.
             return true;
         }
+
+        // Chech if we've already processed this trace_id
+        if self.overriden_traces.contains(&trace_id) {
+            return true;
+        }
+
         if !self.prices.contains_key(&trace_id) {
             warn!("No trace_id {} for price override", trace_id);
             return false;
-        } else {
-            for (reserve, symbol, new_price) in new_prices_by_asset.iter() {
-                let old_price = match self.prices.get(&trace_id).and_then(|p| p.get(reserve)) {
-                    Some(&price) => price,
-                    None => {
-                        warn!(
-                            "Failed to get old price for asset {} in trace {}",
-                            reserve, trace_id
-                        );
-                        U256::ZERO
-                    }
-                };
-                if let Some(prices) = self.prices.get_mut(&trace_id) {
-                    prices.insert(*reserve, *new_price);
-                    let old_price_str = if old_price == U256::ZERO {
-                        "INVALID".to_string()
-                    } else {
-                        old_price.to_string()
-                    };
-                    info!(
-                        "Successfully override {} price cache for {}. (old ={}, current={})",
-                        trace_id, symbol, old_price_str, new_price,
+        }
+
+        for (reserve, symbol, new_price) in new_prices_by_asset.iter() {
+            let old_price = match self.prices.get(&trace_id).and_then(|p| p.get(reserve)) {
+                Some(&price) => price,
+                None => {
+                    warn!(
+                        "Failed to get old price for asset {} in trace {}",
+                        reserve, trace_id
                     );
+                    U256::ZERO
                 }
+            };
+            if let Some(prices) = self.prices.get_mut(&trace_id) {
+                prices.insert(*reserve, *new_price);
+                let old_price_str = if old_price == U256::ZERO {
+                    "INVALID".to_string()
+                } else {
+                    old_price.to_string()
+                };
+                info!(
+                    "Successfully override {} price cache for {}. (old ={}, current={})",
+                    trace_id, symbol, old_price_str, new_price,
+                );
             }
         }
+
+        // Mark the trace as overriden
+        // This hashset get's it's element removed when the trace is dropped from the cache
+        // at price_cache.get_price()
+        self.overriden_traces.insert(trace_id.clone());
+
         true
     }
 
@@ -452,6 +466,7 @@ impl PriceCache {
                 if let Some(oldest_trace) = self.trace_order.pop_front() {
                     info!("Dropping prices cached for {}", oldest_trace);
                     self.prices.remove(&oldest_trace);
+                    self.overriden_traces.remove(&oldest_trace);
                 }
             }
             self.trace_order.push_back(trace_id.clone());
