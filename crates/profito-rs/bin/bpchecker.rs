@@ -519,7 +519,11 @@ async fn calculate_pair_profitability(
     println!(
         "\t\tcollateral to liquidate = {} ($ {})",
         actual_collateral_to_liquidate,
-        format_units(actual_collateral_to_liquidate * collateral_asset_price, collateral_asset_decimals + 8).unwrap()
+        format_units(
+            actual_collateral_to_liquidate * collateral_asset_price,
+            collateral_asset_decimals + 8
+        )
+        .unwrap()
     );
 
     // These aren't relevant to AAVE, that's why you won't find anything on them in Aave code
@@ -529,7 +533,10 @@ async fn calculate_pair_profitability(
         (actual_debt_to_liquidate * debt_asset_price * collateral_asset_unit)
             / (collateral_asset_price * debt_asset_unit);
     println!("\t\tdebt in collateral units:");
-    println!("\t\t\t{} x {} x {}", actual_debt_to_liquidate, debt_asset_price, collateral_asset_unit);
+    println!(
+        "\t\t\t{} x {} x {}",
+        actual_debt_to_liquidate, debt_asset_price, collateral_asset_unit
+    );
     println!("\t\t\t-------------------------------------------------");
     println!("\t\t\t{} x {}", collateral_asset_price, debt_asset_unit);
 
@@ -724,12 +731,22 @@ async fn main() {
     println!("\n### Most profitable liquidation opportunity ###");
     if let Some(best) = best_pair {
         println!("\tliquidationCall(");
-        println!("\t\tcollateralAsset = {}, # {}", best.collateral_asset, reserves_configuration.get(&best.collateral_asset).unwrap().symbol);
-        println!("\t\tdebtAsset = {}, # {}", best.debt_asset, reserves_configuration.get(&best.debt_asset).unwrap().symbol);
+        println!(
+            "\t\tcollateralAsset = {}, # {}",
+            best.collateral_asset,
+            reserves_configuration
+                .get(&best.collateral_asset)
+                .unwrap()
+                .symbol
+        );
+        println!(
+            "\t\tdebtAsset = {}, # {}",
+            best.debt_asset,
+            reserves_configuration.get(&best.debt_asset).unwrap().symbol
+        );
         println!("\t\tuser = {},", user_address);
         println!("\t\tdebtToCover = {},", best.actual_debt_to_liquidate);
         println!("\t\treceiveAToken = false,");
         println!("\t)");
     }
-
 }

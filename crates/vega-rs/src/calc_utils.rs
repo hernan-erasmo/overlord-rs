@@ -54,7 +54,7 @@ pub async fn get_hf_for_users(
     for bucket in address_buckets {
         let pool = pool.clone();
         let event_bus = event_bus.clone();
-        let new_prices_by_asset= new_prices_by_asset.clone();
+        let new_prices_by_asset = new_prices_by_asset.clone();
         let trace_id = trace_id
             .as_ref()
             .map(String::from)

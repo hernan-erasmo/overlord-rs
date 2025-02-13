@@ -1,5 +1,5 @@
 use alloy::{
-    primitives::{address, Address, U256, utils::format_units},
+    primitives::{address, utils::format_units, Address, U256},
     providers::{IpcConnect, ProviderBuilder, RootProvider},
     pubsub::PubSubFrontend,
     sol,
@@ -389,7 +389,7 @@ impl PriceCache {
     async fn override_price(
         &mut self,
         trace_id: String,
-        new_prices_by_asset: Vec<(Address, String, U256)>
+        new_prices_by_asset: Vec<(Address, String, U256)>,
     ) -> bool {
         if new_prices_by_asset.is_empty() {
             // This means initial-run from vega-rs. No prices to update.
@@ -403,7 +403,10 @@ impl PriceCache {
                 let old_price = match self.prices.get(&trace_id).and_then(|p| p.get(reserve)) {
                     Some(&price) => price,
                     None => {
-                        warn!("Failed to get old price for asset {} in trace {}", reserve, trace_id);
+                        warn!(
+                            "Failed to get old price for asset {} in trace {}",
+                            reserve, trace_id
+                        );
                         U256::ZERO
                     }
                 };
@@ -416,10 +419,7 @@ impl PriceCache {
                     };
                     info!(
                         "Successfully override {} price cache for {}. (old ={}, current={})",
-                        trace_id,
-                        symbol,
-                        old_price_str,
-                        new_price,
+                        trace_id, symbol, old_price_str, new_price,
                     );
                 }
             }
@@ -523,13 +523,19 @@ async fn get_best_debt_collateral_pair(
                 };
 
                 // https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/logic/LiquidationLogic.sol#L379
-                let mut actual_debt_to_liquidate =
-                    percent_mul(borrowed_reserve.scaledVariableDebt, liquidation_close_factor);
+                let mut actual_debt_to_liquidate = percent_mul(
+                    borrowed_reserve.scaledVariableDebt,
+                    liquidation_close_factor,
+                );
 
                 let collateral_asset_price = match price_cache
                     .lock()
                     .await
-                    .get_price(supplied_reserve.underlyingAsset, trace_id.clone(), oracle.clone())
+                    .get_price(
+                        supplied_reserve.underlyingAsset,
+                        trace_id.clone(),
+                        oracle.clone(),
+                    )
                     .await
                 {
                     Ok(price) => price,
@@ -542,7 +548,11 @@ async fn get_best_debt_collateral_pair(
                 let debt_asset_price = match price_cache
                     .lock()
                     .await
-                    .get_price(borrowed_reserve.underlyingAsset, trace_id.clone(), oracle.clone())
+                    .get_price(
+                        borrowed_reserve.underlyingAsset,
+                        trace_id.clone(),
+                        oracle.clone(),
+                    )
                     .await
                 {
                     Ok(price) => price,
@@ -556,9 +566,11 @@ async fn get_best_debt_collateral_pair(
                 let collateral_asset_decimals = collateral_config.data.decimals.to::<u8>();
 
                 let debt_asset_unit = U256::from(10).pow(U256::from(debt_asset_decimals));
-                let collateral_asset_unit = U256::from(10).pow(U256::from(collateral_asset_decimals));
+                let collateral_asset_unit =
+                    U256::from(10).pow(U256::from(collateral_asset_decimals));
 
-                let base_collateral = (debt_asset_price * actual_debt_to_liquidate * collateral_asset_unit)
+                let base_collateral =
+                    (debt_asset_price * actual_debt_to_liquidate * collateral_asset_unit)
                         / (collateral_asset_price * debt_asset_unit);
                 // Yes, the liquidation bonus considered here is an attribute of the collateral asset. The following traces from here
                 // https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/logic/LiquidationLogic.sol#L498
@@ -604,8 +616,8 @@ async fn get_best_debt_collateral_pair(
                 // In order to calculate net profit, everthing must be denominated in collateral units
                 // otherwise it will return garbage
                 let debt_in_collateral_units =
-                (actual_debt_to_liquidate * debt_asset_price * collateral_asset_unit)
-                    / (collateral_asset_price * debt_asset_unit);
+                    (actual_debt_to_liquidate * debt_asset_price * collateral_asset_unit)
+                        / (collateral_asset_price * debt_asset_unit);
 
                 if collateral_amount < liquidation_fee + debt_in_collateral_units {
                     warn!(
@@ -629,7 +641,11 @@ async fn get_best_debt_collateral_pair(
                         collateral_symbol: collateral_symbol.clone(),
                         collateral_amount,
                         collateral_asset: supplied_reserve.underlyingAsset,
-                        net_profit: format_units(net_profit * collateral_asset_price, collateral_asset_decimals + 8).unwrap(),
+                        net_profit: format_units(
+                            net_profit * collateral_asset_price,
+                            collateral_asset_decimals + 8,
+                        )
+                        .unwrap(),
                     });
                 }
             }
@@ -676,7 +692,12 @@ async fn process_uw_event(
                 .await
             {
                 Ok(user_reserves_data) => {
-                    if !price_cache.lock().await.override_price(uw_event.trace_id.clone(), uw_event.new_asset_prices).await {
+                    if !price_cache
+                        .lock()
+                        .await
+                        .override_price(uw_event.trace_id.clone(), uw_event.new_asset_prices)
+                        .await
+                    {
                         warn!("Price(s) for uw_event with trace_id {} couldn't be overriden. Next calculations won't consider the pending price update TX values.", uw_event.trace_id);
                     }
                     if let Some(best_pair) = get_best_debt_collateral_pair(
