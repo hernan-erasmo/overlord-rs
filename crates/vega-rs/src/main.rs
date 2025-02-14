@@ -1,16 +1,16 @@
 use alloy::{
-    primitives::Address,
+    primitives::{Address, U256},
     providers::{IpcConnect, ProviderBuilder},
 };
 use bincode::deserialize;
 use chrono::Local;
 use clap::Parser;
 use overlord_shared_types::{MessageBundle, PriceUpdateBundle};
-use std::sync::Arc;
 use std::env;
 use std::error::Error;
 use std::fs::File;
 use std::io::Write;
+use std::sync::Arc;
 use tokio::time::Instant;
 use tracing::{error, info, warn};
 use tracing_appender::rolling::{self, Rotation};
@@ -51,7 +51,7 @@ async fn run_price_update_pipeline(
     event_bus: Arc<UnderwaterUserEventBus>,
 ) {
     let pipeline_processing = Instant::now();
-    let address_buckets = cache.get_candidates_for_bundle(bundle).await;
+    let (address_buckets, affected_reserves) = cache.get_candidates_for_bundle(bundle).await;
     if address_buckets.len() == 1 && address_buckets[0].is_empty() {
         return;
     }
@@ -62,11 +62,22 @@ async fn run_price_update_pipeline(
             return;
         }
     };
+    let new_prices_by_asset = affected_reserves
+        .iter()
+        .map(|r_info| {
+            (
+                r_info.reserve_address,
+                r_info.symbol.clone(),
+                bundle.map_or(U256::ZERO, |b| b.tx_new_price),
+            )
+        })
+        .collect::<Vec<(Address, String, U256)>>();
     let trace_id = bundle.map_or("initial-run".to_string(), |b| b.trace_id.clone());
     let results = get_hf_for_users(
         address_buckets,
         fork_provider.fork_provider.as_ref().unwrap(),
         Some(trace_id.clone()),
+        new_prices_by_asset,
         Some(event_bus),
     )
     .await;
@@ -129,7 +140,7 @@ async fn _dump_initial_hf_results(
         }
     };
     let init_hf_results =
-        get_hf_for_users(user_buckets, &provider, None, Some(event_bus)).await;
+        get_hf_for_users(user_buckets, &provider, None, vec![], Some(event_bus)).await;
     let init_hf_results_filepath = format!(
         "{}/init_hf_under_1_results_{}.txt",
         output_data_dir,
@@ -225,7 +236,10 @@ async fn main() -> Result<(), String> {
         while let Ok(event) = uw_log_subscriber.recv().await {
             info!(
                 "ALERT (from event bus) | {} | {} has HF < 1: {} (total collateral {})",
-                event.trace_id, event.address, event.user_account_data.healthFactor, event.user_account_data.totalCollateralBase
+                event.trace_id,
+                event.address,
+                event.user_account_data.healthFactor,
+                event.user_account_data.totalCollateralBase
             );
         }
     });
@@ -246,7 +260,9 @@ async fn main() -> Result<(), String> {
         }
     });
 
-    if let Err(e) = _dump_initial_hf_results(user_buckets, &temp_output_dir, uw_event_bus.clone()).await {
+    if let Err(e) =
+        _dump_initial_hf_results(user_buckets, &temp_output_dir, uw_event_bus.clone()).await
+    {
         error!("Failed to dump initial HF results: {:?}", e);
         std::process::exit(1);
     }

@@ -4,15 +4,9 @@ use alloy::{
     pubsub::PubSubFrontend,
 };
 use futures::future::join_all;
-use overlord_shared_types::{
-    AaveV3Pool,
-    UnderwaterUserEvent
-};
+use overlord_shared_types::{AaveV3Pool, UnderwaterUserEvent};
 use std::{collections::HashMap, sync::Arc};
-use tokio::{
-    sync::broadcast,
-    task
-};
+use tokio::{sync::broadcast, task};
 use tracing::warn;
 
 const HF_MIN_THRESHOLD: u128 = 1_000_000_000_000_000_000u128;
@@ -48,9 +42,9 @@ pub async fn get_hf_for_users(
     address_buckets: Vec<Vec<Address>>,
     provider: &RootProvider<PubSubFrontend>,
     trace_id: Option<String>,
+    new_prices_by_asset: Vec<(Address, String, U256)>,
     event_bus: Option<Arc<UnderwaterUserEventBus>>,
-) -> HealthFactorCalculationResults
-{
+) -> HealthFactorCalculationResults {
     let mut tasks = vec![];
     let pool = Arc::new(AaveV3Pool::new(
         address!("87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2"),
@@ -60,7 +54,11 @@ pub async fn get_hf_for_users(
     for bucket in address_buckets {
         let pool = pool.clone();
         let event_bus = event_bus.clone();
-        let trace_id = trace_id.as_ref().map(String::from).unwrap_or_else(|| String::from("initial-run"));
+        let new_prices_by_asset = new_prices_by_asset.clone();
+        let trace_id = trace_id
+            .as_ref()
+            .map(String::from)
+            .unwrap_or_else(|| String::from("initial-run"));
         let task = task::spawn(async move {
             let mut bucket_results = HashMap::new();
             for address in bucket {
@@ -73,6 +71,7 @@ pub async fn get_hf_for_users(
                                     address,
                                     trace_id: trace_id.clone(),
                                     user_account_data: data.clone(),
+                                    new_asset_prices: new_prices_by_asset.clone(),
                                 });
                             }
                         }

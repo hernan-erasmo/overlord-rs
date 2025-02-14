@@ -18,6 +18,7 @@ pub struct UnderwaterUserEvent {
     pub address: Address,
     pub trace_id: String,
     pub user_account_data: AaveV3Pool::getUserAccountDataReturn,
+    pub new_asset_prices: Vec<(Address, String, U256)>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
