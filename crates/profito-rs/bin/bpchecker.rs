@@ -3,13 +3,18 @@ use alloy::{
     providers::{IpcConnect, Provider, ProviderBuilder, RootProvider},
     pubsub::PubSubFrontend,
 };
-use profito_rs::sol_bindings::{
-    AaveOracle,
-    AaveProtocolDataProvider,
-    AaveUIPoolDataProvider,
-    pool::AaveV3Pool,
-    IUiPoolDataProviderV3::UserReserveData,
-    GetReserveConfigurationDataReturn,
+use profito_rs::{
+    sol_bindings::{
+        AaveOracle,
+        AaveProtocolDataProvider,
+        AaveUIPoolDataProvider,
+        pool::AaveV3Pool,
+        IUiPoolDataProviderV3::UserReserveData,
+    },
+    utils::{
+        ReserveConfigurationData,
+        ReserveConfigurationEnhancedData,
+    }
 };
 use std::{collections::HashMap, env};
 
@@ -23,14 +28,6 @@ struct BestPair {
     liquidation_protocol_fee_amount: U256,
 }
 
-#[derive(Debug, Clone)]
-struct ReserveConfigurationEnhancedData {
-    symbol: String,
-    data: GetReserveConfigurationDataReturn,
-    liquidation_fee: U256,
-}
-
-type ReserveConfigurationData = HashMap<Address, ReserveConfigurationEnhancedData>;
 
 const AAVE_V3_POOL_ADDRESS: Address = address!("87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2");
 const AAVE_ORACLE_ADDRESS: Address = address!("0x54586bE62E3c3580375aE3723C145253060Ca0C2");
