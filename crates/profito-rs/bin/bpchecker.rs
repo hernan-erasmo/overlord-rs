@@ -4,6 +4,10 @@ use alloy::{
     pubsub::PubSubFrontend,
 };
 use profito_rs::{
+    calculations::{
+        percent_div,
+        percent_mul,
+    },
     constants::{
         AAVE_ORACLE_ADDRESS,
         AAVE_V3_POOL_ADDRESS,
@@ -282,18 +286,6 @@ async fn get_user_health_factor(provider: RootProvider<PubSubFrontend>, user: Ad
             std::process::exit(1);
         }
     }
-}
-
-/// This mimics `percentMul` at
-/// https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/math/PercentageMath.sol#L25
-fn percent_mul(value: U256, percentage: U256) -> U256 {
-    (value * percentage + U256::from(0.5e4)) / U256::from(1e4)
-}
-
-/// This mimics `percentDiv` at
-/// https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/math/PercentageMath.sol#L48
-fn percent_div(value: U256, percentage: U256) -> U256 {
-    ((value * U256::from(1e4)) + (percentage / U256::from(2))) / percentage
 }
 
 async fn calculate_pair_profitability(

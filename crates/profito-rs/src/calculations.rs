@@ -27,13 +27,13 @@ pub struct DebtCollateralPairInfo {
 
 /// This mimics `percentMul` at
 /// https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/math/PercentageMath.sol#L25
-fn percent_mul(value: U256, percentage: U256) -> U256 {
+pub fn percent_mul(value: U256, percentage: U256) -> U256 {
     (value * percentage + U256::from(0.5e4)) / U256::from(1e4)
 }
 
 /// This mimics `percentDiv` at
 /// https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/math/PercentageMath.sol#L48
-fn percent_div(value: U256, percentage: U256) -> U256 {
+pub fn percent_div(value: U256, percentage: U256) -> U256 {
     ((value * U256::from(1e4)) + (percentage / U256::from(2))) / percentage
 }
 
