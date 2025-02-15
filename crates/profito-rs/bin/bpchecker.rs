@@ -4,6 +4,13 @@ use alloy::{
     pubsub::PubSubFrontend,
 };
 use profito_rs::{
+    constants::{
+        AAVE_ORACLE_ADDRESS,
+        AAVE_V3_POOL_ADDRESS,
+        AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS,
+        AAVE_V3_PROVIDER_ADDRESS,
+        AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS,
+    },
     sol_bindings::{
         AaveOracle,
         AaveProtocolDataProvider,
@@ -27,15 +34,6 @@ struct BestPair {
     actual_debt_to_liquidate: U256,
     liquidation_protocol_fee_amount: U256,
 }
-
-
-const AAVE_V3_POOL_ADDRESS: Address = address!("87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2");
-const AAVE_ORACLE_ADDRESS: Address = address!("0x54586bE62E3c3580375aE3723C145253060Ca0C2");
-const AAVE_V3_PROVIDER_ADDRESS: Address = address!("2f39d218133afab8f2b819b1066c7e434ad94e9e");
-const AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS: Address =
-    address!("41393e5e337606dc3821075Af65AeE84D7688CBD");
-const AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS: Address =
-    address!("3f78bbd206e4d3c504eb854232eda7e47e9fd8fc");
 
 async fn generate_reserve_details_by_asset(
     provider: RootProvider<PubSubFrontend>,
