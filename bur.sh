@@ -43,6 +43,32 @@ fi
 
 ANVIL_PID=$!
 
+# Wait for anvil to start and IPC file to be created with proper permissions
+echo "Waiting for anvil to start..."
+for i in {1..30}; do
+    if [ -S "$ANVIL_IPC" ] && [ -r "$ANVIL_IPC" ] && [ -w "$ANVIL_IPC" ]; then
+        # Add a small delay to ensure anvil is fully initialized
+        sleep 2
+        # Test the connection
+        if cast block --rpc-url "$ANVIL_IPC" latest > /dev/null 2>&1; then
+            echo "Anvil is ready!"
+            break
+        fi
+    fi
+    echo "Waiting for anvil IPC socket to be ready... ($i/30)"
+    sleep 1
+    if [ $i -eq 30 ]; then
+        echo "Error: Anvil failed to start or IPC socket is not accessible"
+        echo "IPC file exists: $([ -e "$ANVIL_IPC" ] && echo "yes" || echo "no")"
+        echo "IPC file permissions: $(ls -l "$ANVIL_IPC")"
+        echo "Current user: $(whoami)"
+        cleanup
+        exit 1
+    fi
+done
+
+ANVIL_PID=$!
+
 # Wait for anvil to start and IPC file to be created
 echo "Waiting for anvil to start..."
 for i in {1..30}; do
@@ -95,7 +121,7 @@ if [ -n "$TX_HASH" ]; then
     echo "Transaction replayed successfully"
 fi
 
-echo "Running bpchecker..."
+echo "Running bpchecker with user_address: $USER_ADDRESS, ipc_file: $ANVIL_IPC"
 ./target/release/bpchecker "$USER_ADDRESS" "$ANVIL_IPC"
 
 echo "Done!"

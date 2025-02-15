@@ -2,52 +2,16 @@ use alloy::{
     primitives::{address, utils::format_units, Address, U256},
     providers::{IpcConnect, Provider, ProviderBuilder, RootProvider},
     pubsub::PubSubFrontend,
-    sol,
+};
+use profito_rs::sol_bindings::{
+    AaveOracle,
+    AaveProtocolDataProvider,
+    AaveUIPoolDataProvider,
+    pool::AaveV3Pool,
+    IUiPoolDataProviderV3::UserReserveData,
+    GetReserveConfigurationDataReturn,
 };
 use std::{collections::HashMap, env};
-use AaveProtocolDataProvider::getReserveConfigurationDataReturn;
-
-mod pool {
-    use alloy::sol;
-    sol!(
-        #[allow(missing_docs)]
-        #[allow(clippy::too_many_arguments)]
-        #[sol(rpc)]
-        AaveV3Pool,
-        "src/abis/aave_v3_pool.json"
-    );
-}
-
-mod ui {
-    use alloy::sol;
-    sol!(
-        #[allow(missing_docs)]
-        #[allow(clippy::too_many_arguments)]
-        #[sol(rpc)]
-        AaveUIPoolDataProvider,
-        "src/abis/aave_ui_pool_data_provider.json"
-    );
-}
-
-use ui::AaveUIPoolDataProvider;
-use ui::IUiPoolDataProviderV3::UserReserveData;
-
-sol!(
-    #[allow(missing_docs)]
-    #[allow(clippy::too_many_arguments)]
-    #[sol(rpc)]
-    AaveOracle,
-    "src/abis/aave_v3_oracle.json"
-);
-
-sol!(
-    #[allow(missing_docs)]
-    #[allow(clippy::too_many_arguments)]
-    #[sol(rpc)]
-    #[derive(Debug)]
-    AaveProtocolDataProvider,
-    "src/abis/aave_protocol_data_provider.json"
-);
 
 #[derive(Debug)]
 struct BestPair {
@@ -62,7 +26,7 @@ struct BestPair {
 #[derive(Debug, Clone)]
 struct ReserveConfigurationEnhancedData {
     symbol: String,
-    data: getReserveConfigurationDataReturn,
+    data: GetReserveConfigurationDataReturn,
     liquidation_fee: U256,
 }
 
@@ -78,7 +42,7 @@ const AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS: Address =
 
 async fn generate_reserve_details_by_asset(
     provider: RootProvider<PubSubFrontend>,
-    reserves: Vec<ui::IUiPoolDataProviderV3::UserReserveData>,
+    reserves: Vec<UserReserveData>,
 ) -> ReserveConfigurationData {
     let mut symbols_by_address = HashMap::new();
     symbols_by_address.insert(
@@ -315,7 +279,7 @@ async fn get_user_reserves_data(
 }
 
 async fn get_user_health_factor(provider: RootProvider<PubSubFrontend>, user: Address) -> U256 {
-    let pool = pool::AaveV3Pool::new(AAVE_V3_POOL_ADDRESS, provider.clone());
+    let pool = AaveV3Pool::new(AAVE_V3_POOL_ADDRESS, provider.clone());
     match pool.getUserAccountData(user).call().await {
         Ok(account_data) => account_data.healthFactor,
         Err(e) => {

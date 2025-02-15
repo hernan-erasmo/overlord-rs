@@ -1,7 +1,7 @@
 mod cache;
 mod calculations;
 mod constants;
-mod sol_bindings;
+pub mod sol_bindings;
 mod utils;
 
 use alloy::{

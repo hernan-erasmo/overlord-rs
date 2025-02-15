@@ -25,4 +25,15 @@ sol!(
     "src/abis/aave_protocol_data_provider.json"
 );
 
+pub mod pool {
+    use alloy::sol;
+    sol!(
+        #[allow(missing_docs)]
+        #[allow(clippy::too_many_arguments)]
+        #[sol(rpc)]
+        AaveV3Pool,
+        "src/abis/aave_v3_pool.json"
+    );
+}
+
 pub type GetReserveConfigurationDataReturn = AaveProtocolDataProvider::getReserveConfigurationDataReturn;
