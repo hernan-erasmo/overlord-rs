@@ -7,6 +7,7 @@ use profito_rs::{
     calculations::{
         percent_div,
         percent_mul,
+        get_best_fee_tier_for_swap,
     },
     constants::{
         AAVE_ORACLE_ADDRESS,
@@ -476,6 +477,16 @@ async fn calculate_pair_profitability(
     );
     println!("\t\t\t-------------------------------------------------");
     println!("\t\t\t{} x {}", collateral_asset_price, debt_asset_unit);
+
+    // we provide collateral amount, we receive debt amount that we use to repay the loan
+    println!("\t\tSwap information:");
+    let best_fee = get_best_fee_tier_for_swap(
+        provider.clone(),
+        borrowed_reserve.underlyingAsset,
+        supplied_reserve.underlyingAsset,
+        actual_collateral_to_liquidate, //TODO(Hernan): do we really want to calculate based on all awarded collateral?
+    ).await;
+    println!("\t\t\tBest fee (in debt units): {} ({})", best_fee.best_fee, best_fee.best_output);
 
     // THIS IS WHAT WE MUST OPTIMIZE FOR
     let net_profit = actual_collateral_to_liquidate - debt_in_collateral_units;
