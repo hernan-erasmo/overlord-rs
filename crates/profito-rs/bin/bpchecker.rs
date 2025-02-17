@@ -341,7 +341,7 @@ async fn calculate_pair_profitability(
         format_units(liquidation_close_factor, 4).unwrap(),
         actual_debt_to_liquidate,
         format_units(
-            borrowed_reserve.scaledVariableDebt * debt_asset_price,
+            percent_mul(borrowed_reserve.scaledVariableDebt, liquidation_close_factor) * debt_asset_price,
             debt_asset_decimals + 8
         )
         .unwrap(),
