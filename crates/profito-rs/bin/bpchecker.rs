@@ -486,7 +486,7 @@ async fn calculate_pair_profitability(
         supplied_reserve.underlyingAsset,
         actual_collateral_to_liquidate, //TODO(Hernan): do we really want to calculate based on all awarded collateral?
     ).await;
-    println!("\t\t\tBest fee (in debt units): {} ({})", best_fee.best_fee, best_fee.best_output);
+    println!("\t\t\tBest swap (in debt units): {} ({} at pool ?)", best_fee.best_output, best_fee.best_fee);
 
     // THIS IS WHAT WE MUST OPTIMIZE FOR
     let net_profit = actual_collateral_to_liquidate - debt_in_collateral_units;
