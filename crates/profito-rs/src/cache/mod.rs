@@ -1,4 +1,4 @@
-mod provider;
 mod price;
-pub use provider::ProviderCache;
+mod provider;
 pub use price::PriceCache;
+pub use provider::ProviderCache;

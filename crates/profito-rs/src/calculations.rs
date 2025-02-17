@@ -1,19 +1,16 @@
+use crate::constants::{UNISWAP_V3_FACTORY, UNISWAP_V3_QUOTER};
 use alloy::{
     primitives::{aliases::U24, utils::format_units, Address, U160, U256},
     providers::RootProvider,
     pubsub::PubSubFrontend,
 };
 use std::sync::Arc;
-use crate::constants::{UNISWAP_V3_FACTORY, UNISWAP_V3_QUOTER};
 
 use super::{
     cache::PriceCache,
     sol_bindings::{
-        AaveOracle,
-        IUiPoolDataProviderV3::UserReserveData,
-        UniswapV3Factory,
+        AaveOracle, IUiPoolDataProviderV3::UserReserveData, UniswapV3Factory, UniswapV3Pool,
         UniswapV3Quoter,
-        UniswapV3Pool,
     },
     utils::ReserveConfigurationData,
 };
@@ -30,9 +27,10 @@ pub struct DebtCollateralPairInfo {
     pub net_profit: String,
 }
 
-pub struct BestFeeTierForSwapResult {
-    pub best_fee: U24,
-    pub best_output: U256,
+pub struct BestFlashSwapArgs {
+    pub fee: U24,
+    pub collateral_required: U256,
+    pub pool: Address,
 }
 
 /// This mimics `percentMul` at
@@ -52,33 +50,43 @@ pub fn percent_div(value: U256, percentage: U256) -> U256 {
 /// provides the required liquidity for the lowest fee.
 pub async fn get_best_fee_tier_for_swap(
     provider: RootProvider<PubSubFrontend>,
-    token_in: Address,
-    token_out: Address,
+    token_debt: Address,
+    token_collateral: Address,
     amount: U256,
-) -> BestFeeTierForSwapResult {
-    let mut best_output = U256::ZERO;
+) -> BestFlashSwapArgs {
+    let mut best_output = U256::MAX;
     let mut best_fee = U24::from(100);
-    let available_fees = vec![U24::from(100), U24::from(500), U24::from(3000), U24::from(10000)];
+    let mut best_contract = Address::ZERO;
+    let available_fees = vec![
+        U24::from(100),   // 0.01%
+        U24::from(500),   // 0.05%
+        U24::from(3000),  // 0.3%
+        U24::from(10000), // 1%
+    ];
 
     let factory = UniswapV3Factory::new(UNISWAP_V3_FACTORY, provider.clone());
     let quoter = UniswapV3Quoter::new(UNISWAP_V3_QUOTER, provider.clone());
 
     for available_fee in available_fees.iter() {
-        println!("\t\t\tChecking fee {}", available_fee);
         // Check if pool exists
-        let pool_contract_address = match factory.getPool(token_in, token_out, *available_fee).call().await {
+        let pool_contract_address = match factory
+            .getPool(token_debt, token_collateral, *available_fee)
+            .call()
+            .await
+        {
             Ok(address) => {
                 if address._0 == Address::ZERO {
                     println!("\t\t\tPool doesn't exist for fee {}", available_fee);
                     continue; // Pool doesn't exist for this fee tier
-                } else {
-                    println!("\t\t\tFound pool for fee {} at {}", available_fee, address._0);
                 }
                 address._0
-            },
+            }
             Err(e) => {
                 // When running this against a local provider, you need to keep in mind pruning because that has already happened
-                warn!("Failed to get pool address for fee {}: {}", available_fee, e);
+                warn!(
+                    "Failed to get pool address for fee {}: {}",
+                    available_fee, e
+                );
                 continue;
             }
         };
@@ -90,55 +98,49 @@ pub async fn get_best_fee_tier_for_swap(
                 match pool_contract.$method().call().await {
                     Ok(val) => val._0,
                     Err(e) => {
-                        println!("\t\t\t\tFailed to get {} for pool {}: {}", stringify!($method), pool_contract_address, e);
-                        warn!("Failed to get {} for pool {}: {}", stringify!($method), pool_contract_address, e);
+                        warn!(
+                            "Failed to get {} for pool {}: {}",
+                            stringify!($method),
+                            pool_contract_address,
+                            e
+                        );
                         continue;
                     }
                 }
             };
         }
 
-        let token_0 = call_pool!(token0);
-        let token_1 = call_pool!(token1);
         let fee = call_pool!(fee);
 
         // Get quote
         let output = match quoter
-            .quoteExactInputSingle(
-                token_0,
-                token_1,
-                fee,
-                amount,
-                U160::from(0), // sqrtPriceLimitX96
-            )
+            .quoteExactOutputSingle(token_collateral, token_debt, fee, amount, U160::from(0))
             .call()
             .await
         {
-            Ok(quoter_output) => {
+            Ok(quote) => {
                 println!(
-                    "\t\t\t\tOutput for token0: {}, token1: {}, and fee: {} - {}",
-                    token_0, token_1, available_fee, quoter_output.amountOut
+                    "\t\t\tPool {} requires {} collateral to repay {} debt",
+                    pool_contract_address, quote.amountIn, amount
                 );
-                quoter_output.amountOut
-            },
+                quote.amountIn
+            }
             Err(e) => {
-                println!(
-                    "\t\t\t\tFailed to get output for token0: {}, token1: {}, and fee: {}: {}",
-                    token_0, token_1, available_fee, e
-                );
-                U256::from(0)
+                continue;
             }
         };
 
-        if output > best_output {
+        if output < best_output {
             best_output = output;
             best_fee = *available_fee;
+            best_contract = pool_contract_address;
         }
     }
 
-    BestFeeTierForSwapResult {
-        best_fee,
-        best_output,
+    BestFlashSwapArgs {
+        fee: best_fee,
+        collateral_required: best_output,
+        pool: best_contract,
     }
 }
 

@@ -4,29 +4,16 @@ use alloy::{
     pubsub::PubSubFrontend,
 };
 use profito_rs::{
-    calculations::{
-        percent_div,
-        percent_mul,
-        get_best_fee_tier_for_swap,
-    },
+    calculations::{get_best_fee_tier_for_swap, percent_div, percent_mul},
     constants::{
-        AAVE_ORACLE_ADDRESS,
-        AAVE_V3_POOL_ADDRESS,
-        AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS,
-        AAVE_V3_PROVIDER_ADDRESS,
-        AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS,
+        AAVE_ORACLE_ADDRESS, AAVE_V3_POOL_ADDRESS, AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS,
+        AAVE_V3_PROVIDER_ADDRESS, AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS,
     },
     sol_bindings::{
-        AaveOracle,
-        AaveProtocolDataProvider,
-        AaveUIPoolDataProvider,
-        pool::AaveV3Pool,
+        pool::AaveV3Pool, AaveOracle, AaveProtocolDataProvider, AaveUIPoolDataProvider,
         IUiPoolDataProviderV3::UserReserveData,
     },
-    utils::{
-        ReserveConfigurationData,
-        ReserveConfigurationEnhancedData,
-    }
+    utils::{ReserveConfigurationData, ReserveConfigurationEnhancedData},
 };
 use std::{collections::HashMap, env};
 
@@ -480,21 +467,25 @@ async fn calculate_pair_profitability(
 
     // we provide collateral amount, we receive debt amount that we use to repay the loan
     println!("\t\tSwap information:");
-    let best_fee = get_best_fee_tier_for_swap(
+    let flash_args = get_best_fee_tier_for_swap(
         provider.clone(),
         borrowed_reserve.underlyingAsset,
         supplied_reserve.underlyingAsset,
-        actual_collateral_to_liquidate, //TODO(Hernan): do we really want to calculate based on all awarded collateral?
-    ).await;
-    println!("\t\t\tBest swap (in debt units): {} ({} at pool ?)", best_fee.best_output, best_fee.best_fee);
+        actual_debt_to_liquidate, //TODO(Hernan): do we really want to calculate based on all awarded collateral?
+    )
+    .await;
+    println!(
+        "\t\t\tBest swap: {} collateral required to repay debt ({}bp at pool {})",
+        flash_args.collateral_required, flash_args.fee, flash_args.pool
+    );
 
     // THIS IS WHAT WE MUST OPTIMIZE FOR
-    let net_profit = actual_collateral_to_liquidate - debt_in_collateral_units;
+    let net_profit = actual_collateral_to_liquidate - flash_args.collateral_required;
 
     println!(
         "\t\tnet profit (collateral reward - debt repaid - liq fee) ({} - {} - {})\n\t\t\t{} ($ {})",
         actual_collateral_to_liquidate, // collateral units
-        debt_in_collateral_units, // this ensures debt is in collateral units
+        flash_args.collateral_required,
         liquidation_fee, // collateral units
         net_profit,
         format_units(net_profit * collateral_asset_price, collateral_asset_decimals + 8).unwrap(),

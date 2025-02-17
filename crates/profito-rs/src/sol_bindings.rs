@@ -63,4 +63,5 @@ pub mod pool {
     );
 }
 
-pub type GetReserveConfigurationDataReturn = AaveProtocolDataProvider::getReserveConfigurationDataReturn;
+pub type GetReserveConfigurationDataReturn =
+    AaveProtocolDataProvider::getReserveConfigurationDataReturn;

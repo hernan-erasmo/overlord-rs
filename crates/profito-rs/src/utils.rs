@@ -1,11 +1,11 @@
-use alloy::primitives::{address, Address, U256};
 use super::cache::ProviderCache;
 use super::constants::*;
-use std::collections::HashMap;
-use std::sync::Arc;
 use super::sol_bindings::{
     AaveProtocolDataProvider, AaveUIPoolDataProvider, GetReserveConfigurationDataReturn,
 };
+use alloy::primitives::{address, Address, U256};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct ReserveConfigurationEnhancedData {
