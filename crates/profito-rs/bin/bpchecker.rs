@@ -479,14 +479,29 @@ async fn calculate_pair_profitability(
         flash_args.collateral_required, flash_args.fee, flash_args.pool
     );
 
-    // THIS IS WHAT WE MUST OPTIMIZE FOR
-    let net_profit = actual_collateral_to_liquidate - flash_args.collateral_required;
+    // THIS IS THE CORE OF THE CALCULATION, WHAT DECIDES WHETHER OR NOT WE MOVE ON WITH THE EXECUTION
+    let gas_used_estimation = U256::from(1000000); // TODO(Hernan): good-enough this
+    let gas_price_in_gwei = match provider.get_gas_price().await {
+        Ok(price) => U256::from(price) / U256::from(1e3),
+        Err(e) => {
+            U256::MAX
+        }
+    };
+    let execution_gas_cost = (gas_used_estimation * gas_price_in_gwei) / U256::from(1000000);
+    let swap_loss_factor = U256::from(10000); // this assumes we will swap in 1% fee pools (could be more sophisticated)
+    let swap_total_cost = actual_collateral_to_liquidate - percent_mul(actual_collateral_to_liquidate, swap_loss_factor);
+    let net_profit =
+        actual_collateral_to_liquidate - // This already has the liquidation fee deducted
+        flash_args.collateral_required - // TODO(Hernan): WTF is this?!?!?!?!?
+        execution_gas_cost -
+        swap_total_cost;
 
     println!(
-        "\t\tnet profit (collateral reward - debt repaid - liq fee) ({} - {} - {})\n\t\t\t{} ($ {})",
+        "\t\tnet profit (collateral reward - debt repaid - swap cost - execution cost) ({} - {} - {} - {})\n\t\t\t{} ($ {})",
         actual_collateral_to_liquidate, // collateral units
         flash_args.collateral_required,
-        liquidation_fee, // collateral units
+        swap_total_cost,
+        execution_gas_cost,
         net_profit,
         format_units(net_profit * collateral_asset_price, collateral_asset_decimals + 8).unwrap(),
     );
