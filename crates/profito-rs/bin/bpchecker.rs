@@ -465,20 +465,6 @@ async fn calculate_pair_profitability(
     println!("\t\t\t-------------------------------------------------");
     println!("\t\t\t{} x {}", collateral_asset_price, debt_asset_unit);
 
-    // we provide collateral amount, we receive debt amount that we use to repay the loan
-    println!("\t\tSwap information:");
-    let flash_args = get_best_fee_tier_for_swap(
-        provider.clone(),
-        borrowed_reserve.underlyingAsset,
-        supplied_reserve.underlyingAsset,
-        actual_debt_to_liquidate, //TODO(Hernan): do we really want to calculate based on all awarded collateral?
-    )
-    .await;
-    println!(
-        "\t\t\tBest swap: {} collateral required to repay debt ({}bp at pool {})",
-        flash_args.collateral_required, flash_args.fee, flash_args.pool
-    );
-
     // THIS IS THE CORE OF THE CALCULATION, WHAT DECIDES WHETHER OR NOT WE MOVE ON WITH THE EXECUTION
     let gas_used_estimation = U256::from(1000000); // TODO(Hernan): good-enough this
     let gas_price_in_gwei = match provider.get_gas_price().await {
@@ -489,17 +475,17 @@ async fn calculate_pair_profitability(
     };
     let execution_gas_cost = (gas_used_estimation * gas_price_in_gwei) / U256::from(1000000);
     let swap_loss_factor = U256::from(10000); // this assumes we will swap in 1% fee pools (could be more sophisticated)
-    let swap_total_cost = actual_collateral_to_liquidate - percent_mul(actual_collateral_to_liquidate, swap_loss_factor);
+    let swap_total_cost = actual_collateral_to_liquidate - percent_div(actual_collateral_to_liquidate, swap_loss_factor);
     let net_profit =
         actual_collateral_to_liquidate - // This already has the liquidation fee deducted
-        flash_args.collateral_required - // TODO(Hernan): WTF is this?!?!?!?!?
+        debt_in_collateral_units -
         execution_gas_cost -
         swap_total_cost;
 
     println!(
         "\t\tnet profit (collateral reward - debt repaid - swap cost - execution cost) ({} - {} - {} - {})\n\t\t\t{} ($ {})",
         actual_collateral_to_liquidate, // collateral units
-        flash_args.collateral_required,
+        debt_in_collateral_units,
         swap_total_cost,
         execution_gas_cost,
         net_profit,
