@@ -4,6 +4,14 @@ sol!(
     #[allow(missing_docs)]
     #[allow(clippy::too_many_arguments)]
     #[sol(rpc)]
+    ERC20,
+    "src/abis/erc20.json"
+);
+
+sol!(
+    #[allow(missing_docs)]
+    #[allow(clippy::too_many_arguments)]
+    #[sol(rpc)]
     AaveUIPoolDataProvider,
     "src/abis/aave_ui_pool_data_provider.json"
 );

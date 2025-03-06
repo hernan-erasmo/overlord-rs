@@ -11,7 +11,7 @@ use profito_rs::{
     },
     sol_bindings::{
         pool::AaveV3Pool, AaveOracle, AaveProtocolDataProvider, AaveUIPoolDataProvider,
-        IUiPoolDataProviderV3::UserReserveData,
+        IUiPoolDataProviderV3::UserReserveData, ERC20,
     },
     utils::{ReserveConfigurationData, ReserveConfigurationEnhancedData},
 };
@@ -274,6 +274,51 @@ async fn get_user_health_factor(provider: RootProvider<PubSubFrontend>, user: Ad
             std::process::exit(1);
         }
     }
+}
+
+/// This function is the rust equivalent of _calculateDebt() defined in LiquidationLogic.sol
+/// https://github.com/aave/aave-v3-core/blob/b74526a7bc67a3a117a1963fc871b3eb8cea8435/contracts/protocol/libraries/logic/LiquidationLogic.sol#L363
+async fn calculate_debt(provider: RootProvider<PubSubFrontend>, user: Address, debt_asset: Address, user_health_factor: U256) -> (U256, U256, U256) {
+    let pool = AaveV3Pool::new(AAVE_V3_POOL_ADDRESS, provider.clone());
+    let stable_debt_token_address: Address;
+    let variable_debt_token_address: Address;
+    (stable_debt_token_address, variable_debt_token_address) = match pool.getReserveData(debt_asset).call().await {
+        Ok(reserve_data) => (reserve_data._0.stableDebtTokenAddress, reserve_data._0.variableDebtTokenAddress),
+        Err(e) => {
+            eprintln!("Error trying to call getUserAccountData: {}", e);
+            std::process::exit(1);
+        }
+    };
+    let stable_debt = ERC20::new(stable_debt_token_address, provider.clone());
+    let variable_debt = ERC20::new(variable_debt_token_address, provider.clone());
+    let user_stable_debt = match stable_debt.balanceOf(user).call().await {
+        Ok(balance_of_return) => balance_of_return.balance,
+        Err(e) => {
+            eprintln!("Failed to get stable debt balance: {}", e);
+            U256::ZERO
+        }
+    };
+    let user_variable_debt = match variable_debt.balanceOf(user).call().await {
+        Ok(balance_of_return) => balance_of_return.balance,
+        Err(e) => {
+            eprintln!("Failed to get variable debt balance: {}", e);
+            U256::ZERO
+        }
+    };
+    let user_total_debt = user_stable_debt + user_variable_debt;
+    let close_factor = if user_health_factor <= U256::from(0.95e18) {
+        U256::from(1e4)
+    } else {
+        U256::from(0.5e4)
+    };
+
+    let max_liquidatable_debt = percent_mul(user_total_debt, close_factor);
+
+    // The solidity function does one more step, and instead of returning max_liquidatable_debt, it checks
+    // if that value is above or below whatever the user called liquidationCall with. This is what makes the "pass
+    // uint(-1) to liquidate max available" possible. We don't need to do that here, as we are only interested in
+    // the amount of debt that can be liquidated.
+    (user_variable_debt, user_total_debt, max_liquidatable_debt)
 }
 
 async fn calculate_pair_profitability(
@@ -629,9 +674,22 @@ async fn main() {
             );
 
             // This is what _calculateDebt() over at LiquidationLogic is supposed to do
-            let actual_debt_to_liquidate = percent_mul(
-                borrowed_reserve.scaledVariableDebt,
-                liquidation_close_factor,
+            let (
+                user_variable_debt,
+                user_total_debt,
+                actual_debt_to_liquidate,
+            ) = calculate_debt(
+                provider.clone(),
+                user_address,
+                borrowed_reserve.underlyingAsset,
+                user_health_factor,
+            ).await;
+            println!(
+                "\t\t(variable, stable, total, actual) = {}, {}, {}, {}",
+                user_variable_debt,
+                user_total_debt,
+                user_total_debt - user_variable_debt,
+                actual_debt_to_liquidate
             );
 
             // The following is what _calculateAvailableCollateralToLiquidate() over at LiquidationLogic is supposed to do
