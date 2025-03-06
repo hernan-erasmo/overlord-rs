@@ -278,17 +278,26 @@ async fn get_user_health_factor(provider: RootProvider<PubSubFrontend>, user: Ad
 
 /// This function is the rust equivalent of _calculateDebt() defined in LiquidationLogic.sol
 /// https://github.com/aave/aave-v3-core/blob/b74526a7bc67a3a117a1963fc871b3eb8cea8435/contracts/protocol/libraries/logic/LiquidationLogic.sol#L363
-async fn calculate_debt(provider: RootProvider<PubSubFrontend>, user: Address, debt_asset: Address, user_health_factor: U256) -> (U256, U256, U256) {
+async fn calculate_debt(
+    provider: RootProvider<PubSubFrontend>,
+    user: Address,
+    debt_asset: Address,
+    user_health_factor: U256,
+) -> (U256, U256, U256) {
     let pool = AaveV3Pool::new(AAVE_V3_POOL_ADDRESS, provider.clone());
     let stable_debt_token_address: Address;
     let variable_debt_token_address: Address;
-    (stable_debt_token_address, variable_debt_token_address) = match pool.getReserveData(debt_asset).call().await {
-        Ok(reserve_data) => (reserve_data._0.stableDebtTokenAddress, reserve_data._0.variableDebtTokenAddress),
-        Err(e) => {
-            eprintln!("Error trying to call getUserAccountData: {}", e);
-            std::process::exit(1);
-        }
-    };
+    (stable_debt_token_address, variable_debt_token_address) =
+        match pool.getReserveData(debt_asset).call().await {
+            Ok(reserve_data) => (
+                reserve_data._0.stableDebtTokenAddress,
+                reserve_data._0.variableDebtTokenAddress,
+            ),
+            Err(e) => {
+                eprintln!("Error trying to call getUserAccountData: {}", e);
+                std::process::exit(1);
+            }
+        };
     let stable_debt = ERC20::new(stable_debt_token_address, provider.clone());
     let variable_debt = ERC20::new(variable_debt_token_address, provider.clone());
     let user_stable_debt = match stable_debt.balanceOf(user).call().await {
@@ -386,7 +395,10 @@ async fn calculate_pair_profitability(
         format_units(liquidation_close_factor, 4).unwrap(),
         actual_debt_to_liquidate,
         format_units(
-            percent_mul(borrowed_reserve.scaledVariableDebt, liquidation_close_factor) * debt_asset_price,
+            percent_mul(
+                borrowed_reserve.scaledVariableDebt,
+                liquidation_close_factor
+            ) * debt_asset_price,
             debt_asset_decimals + 8
         )
         .unwrap(),
@@ -514,15 +526,13 @@ async fn calculate_pair_profitability(
     let gas_used_estimation = U256::from(1000000); // TODO(Hernan): good-enough this
     let gas_price_in_gwei = match provider.get_gas_price().await {
         Ok(price) => U256::from(price) / U256::from(1e3),
-        Err(e) => {
-            U256::MAX
-        }
+        Err(e) => U256::MAX,
     };
     let execution_gas_cost = (gas_used_estimation * gas_price_in_gwei) / U256::from(1000000);
     let swap_loss_factor = U256::from(10000); // this assumes we will swap in 1% fee pools (could be more sophisticated)
-    let swap_total_cost = actual_collateral_to_liquidate - percent_div(actual_collateral_to_liquidate, swap_loss_factor);
-    let net_profit =
-        actual_collateral_to_liquidate - // This already has the liquidation fee deducted
+    let swap_total_cost = actual_collateral_to_liquidate
+        - percent_div(actual_collateral_to_liquidate, swap_loss_factor);
+    let net_profit = actual_collateral_to_liquidate - // This already has the liquidation fee deducted
         debt_in_collateral_units -
         execution_gas_cost -
         swap_total_cost;
@@ -674,16 +684,13 @@ async fn main() {
             );
 
             // This is what _calculateDebt() over at LiquidationLogic is supposed to do
-            let (
-                user_variable_debt,
-                user_total_debt,
-                actual_debt_to_liquidate,
-            ) = calculate_debt(
+            let (user_variable_debt, user_total_debt, actual_debt_to_liquidate) = calculate_debt(
                 provider.clone(),
                 user_address,
                 borrowed_reserve.underlyingAsset,
                 user_health_factor,
-            ).await;
+            )
+            .await;
             println!(
                 "\t\t(variable, stable, total, actual) = {}, {}, {}, {}",
                 user_variable_debt,
