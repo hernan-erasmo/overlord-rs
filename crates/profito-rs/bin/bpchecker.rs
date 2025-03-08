@@ -860,6 +860,29 @@ async fn calculate_user_account_data(
     )
 }
 
+fn print_debt_collateral_title(
+    total_combinations: usize,
+    current_count: i32,
+    borrowed_reserve: UserReserveData,
+    supplied_reserve: UserReserveData,
+    reserves_configuration: HashMap<Address, ReserveConfigurationEnhancedData>,
+) {
+    let borrowed_symbol = reserves_configuration
+        .get(&borrowed_reserve.underlyingAsset)
+        .unwrap()
+        .symbol
+        .clone();
+    let supplied_symbol = reserves_configuration
+        .get(&supplied_reserve.underlyingAsset)
+        .unwrap()
+        .symbol
+        .clone();
+    println!(
+        "\t{}/{}) {} (debt) -> {} (collateral):",
+        current_count, total_combinations, borrowed_symbol, supplied_symbol
+    );
+}
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = env::args().collect();
@@ -930,7 +953,7 @@ async fn main() {
     };
 
     // Print user reserves data
-    println!("\n### User DEBT ###");
+    println!("\n### User DEBT (from getUserReservesData() array) ###");
     for reserve in assets_borrowed.clone() {
         let symbol = reserves_configuration
             .get(&reserve.underlyingAsset)
@@ -950,7 +973,7 @@ async fn main() {
             format_units(reserve.scaledVariableDebt, decimals).unwrap(),
         );
     }
-    println!("\n### User COLLATERAL ###");
+    println!("\n### User COLLATERAL (from getUserReservesData() array) ###");
     for reserve in assets_supplied.clone() {
         let symbol = reserves_configuration
             .get(&reserve.underlyingAsset)
@@ -975,6 +998,8 @@ async fn main() {
     println!("\n### Liquidation path analysis ###");
 
     // Start iterating over available pairs
+    // essentially inspecting executeLiquidationCall internals
+    // for every collateral/debt pair possible
     let mut best_pair: Option<BestPair> = None;
     let total_combinations = assets_borrowed.len() * assets_supplied.len();
     let mut current_count = 1;
@@ -988,19 +1013,12 @@ async fn main() {
             .iter()
             .filter(|r| r.scaledATokenBalance > U256::from(0) && r.usageAsCollateralEnabledOnUser)
         {
-            let borrowed_symbol = reserves_configuration
-                .get(&borrowed_reserve.underlyingAsset)
-                .unwrap()
-                .symbol
-                .clone();
-            let supplied_symbol = reserves_configuration
-                .get(&supplied_reserve.underlyingAsset)
-                .unwrap()
-                .symbol
-                .clone();
-            println!(
-                "\t{}/{}) {} -> {}",
-                current_count, total_combinations, borrowed_symbol, supplied_symbol
+            print_debt_collateral_title(
+                total_combinations,
+                current_count,
+                borrowed_reserve.clone(),
+                supplied_reserve.clone(),
+                reserves_configuration.clone(),
             );
 
             // This is what _calculateDebt() over at LiquidationLogic is supposed to do
