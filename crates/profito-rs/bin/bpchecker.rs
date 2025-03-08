@@ -567,6 +567,58 @@ fn is_using_as_collateral_or_borrowing(user_config: U256, reserve_index: usize) 
     (shifted & mask) != U256::ZERO
 }
 
+/// https://github.com/aave-dao/aave-v3-origin/blob/a0512f8354e97844a3ed819cf4a9a663115b8e20/src/contracts/protocol/libraries/configuration/UserConfiguration.sol#L103
+fn is_using_as_collateral(user_config: U256, reserve_index: usize) -> bool {
+    // In Solidity: (self.data >> ((reserveIndex << 1) + 1)) & 1 != 0
+    // This checks only the collateral bit
+    let shift_amount = (reserve_index * 2) + 1;  // (reserveIndex << 1) + 1
+    let shifted = user_config >> shift_amount;
+    let mask = U256::from(1);  // Binary: 1
+
+    (shifted & mask) != U256::ZERO
+}
+
+/// https://github.com/aave-dao/aave-v3-origin/blob/a0512f8354e97844a3ed819cf4a9a663115b8e20/src/contracts/protocol/libraries/math/WadRayMath.sol#L65
+fn ray_mul(a: U256, b: U256) -> U256 {
+    let ray: U256 = U256::from_str_radix("1000000000000000000000000000", 10).unwrap();  // 1e27
+    let half_ray: U256 = U256::from_str_radix("500000000000000000000000000", 10).unwrap(); // 0.5e27
+
+    if a == U256::ZERO || b == U256::ZERO {
+        return U256::ZERO;
+    }
+
+    // c = (a * b + half_ray) / ray
+    let product = a * b;
+    let with_half = product + half_ray;
+    with_half / ray
+}
+
+async fn get_user_balance_in_base_currency(provider: RootProvider<PubSubFrontend>, reserve: Address, a_token_address: Address, user_address: Address, asset_price: U256, asset_unit: U256) -> U256 {
+    let normalized_income = match AaveV3Pool::new(AAVE_V3_POOL_ADDRESS, provider.clone())
+        .getReserveNormalizedIncome(reserve)
+        .call()
+        .await
+    {
+        Ok(response) => response._0,
+        Err(e) => {
+            eprintln!("Error trying to call getReserveNormalizedIncome: {}", e);
+            U256::ZERO
+        }
+    };
+
+    let a_token = ERC20::new(a_token_address, provider);
+    let scaled_balance = match a_token.balanceOf(user_address).call().await {
+        Ok(balance_of_response) => balance_of_response.balance,
+        Err(e) => {
+            eprintln!("Error trying to call balanceOf for {}: {}", user_address, e);
+            U256::ZERO
+        }
+    };
+
+    let balance = ray_mul(scaled_balance, normalized_income) * asset_price;
+    balance / asset_unit
+}
+
 /// This is the equivalent of _calculateUserAccountData() in LiquidationLogic.sol
 /// https://github.com/aave-dao/aave-v3-origin/blob/bb6ea42947f349fe8182a0ea30c5a7883d1f9ed1/src/contracts/protocol/libraries/logic/GenericLogic.sol#L63
 /// except for emode support. We don't do that here.
@@ -575,7 +627,29 @@ async fn calculate_user_account_data(
     user_address: Address,
 ) -> (U256, U256, U256) {
     // Capture required input arguments
-    let mut user_account_data: (U256, U256, U256) = (U256::ZERO, U256::ZERO, U256::ZERO);
+    let mut total_collateral_in_base_currency = U256::ZERO;
+    let mut total_debt_in_base_currency = U256::ZERO;
+    let mut health_factor = U256::ZERO;
+    let user_account_data = (total_collateral_in_base_currency, total_debt_in_base_currency, health_factor);
+    /*
+        According to https://github.com/aave-dao/aave-v3-origin/blob/a0512f8354e97844a3ed819cf4a9a663115b8e20/src/contracts/protocol/pool/Pool.sol#L532
+        the reserves list is ordered the same way as the _reserveList storage in the Pool contract.
+     */
+    let reserves_list = match AaveV3Pool::new(AAVE_V3_POOL_ADDRESS, provider.clone())
+        .getReservesList()
+        .call()
+        .await
+    {
+        Ok(reserves_list) => reserves_list._0,
+        Err(e) => {
+            eprintln!("Error trying to call getReservesList: {}", e);
+            return user_account_data;
+        }
+    };
+    /*
+        According to https://github.com/aave-dao/aave-v3-origin/blob/a0512f8354e97844a3ed819cf4a9a663115b8e20/src/contracts/helpers/UiPoolDataProviderV3.sol#L45
+        the reserves data is ordered the same way as the reserves list (it actually calls pool.getReservesList() and uses it as index)
+     */
     let reserves_data =
         match AaveUIPoolDataProvider::new(AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, provider.clone())
             .getReservesData(AAVE_V3_PROVIDER_ADDRESS)
@@ -588,17 +662,6 @@ async fn calculate_user_account_data(
                 return user_account_data;
             }
         };
-    let reserves_list = match AaveV3Pool::new(AAVE_V3_POOL_ADDRESS, provider.clone())
-        .getReservesList()
-        .call()
-        .await
-    {
-        Ok(reserves_list) => reserves_list._0,
-        Err(e) => {
-            eprintln!("Error trying to call getReservesList: {}", e);
-            return user_account_data;
-        }
-    };
     let user_config = match AaveV3Pool::new(AAVE_V3_POOL_ADDRESS, provider.clone())
         .getUserConfiguration(user_address)
         .call()
@@ -616,6 +679,36 @@ async fn calculate_user_account_data(
         if !is_using_as_collateral_or_borrowing(user_config.data, i) {
             continue;
         }
+
+        /*
+            Both reservesList and reservesData are aligned in the same order, meaning reservesList[i] is an asset
+            address and reservesData[i] is the data for that asset.
+
+            That assertion is what makes the following valid.
+         */
+        let liquidation_threshold = reserves_data[i].reserveLiquidationThreshold;
+        let decimals = reserves_data[i].decimals;
+        let asset_unit = U256::from(10).pow(U256::from(decimals));
+        let asset_price = match AaveOracle::new(AAVE_ORACLE_ADDRESS, provider.clone())
+            .getAssetPrice(reserve_address)
+            .call()
+            .await
+        {
+            Ok(price_response) => price_response._0,
+            Err(e) => {
+                eprintln!("Error trying to call getAssetPrice: {}", e);
+                return user_account_data;
+            }
+        };
+
+        // Calculate collateral totals
+        if liquidation_threshold != U256::ZERO && is_using_as_collateral(user_config.data, i) {
+            let user_balance_in_base_currency = get_user_balance_in_base_currency(provider.clone(), reserve_address, reserves_data[i].aTokenAddress, user_address, asset_price, asset_unit).await;
+            total_collateral_in_base_currency += user_balance_in_base_currency;
+        };
+
+        // Calculate debt totals
+
     }
 
     // Return values
