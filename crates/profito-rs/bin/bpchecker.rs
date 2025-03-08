@@ -1298,6 +1298,10 @@ async fn main() {
             println!(""); // space before next pair
             // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L309
 
+            // begin section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L320-L344
+            // TODO(Hernan): do we need to make sure this doesn't bite us in the ass?
+            // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L320-L344
+
             if net_profit > best_pair.as_ref().map_or(U256::ZERO, |p| p.net_profit) {
                 best_pair = Some(BestPair {
                     collateral_asset: supplied_reserve.underlyingAsset,
