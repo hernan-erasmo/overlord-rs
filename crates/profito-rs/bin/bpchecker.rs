@@ -604,6 +604,16 @@ fn ray_mul(a: U256, b: U256) -> U256 {
     with_half / ray
 }
 
+/// https://github.com/aave-dao/aave-v3-origin/blob/a0512f8354e97844a3ed819cf4a9a663115b8e20/src/contracts/protocol/libraries/math/WadRayMath.sol#L47
+fn wad_div(a: U256, b: U256) -> U256 {
+    let wad: U256 = U256::from(10).pow(U256::from(18));  // 1e18
+    let half_b = b / U256::from(2);  // div(b, 2)
+
+    // c = (a * WAD + halfB) / b
+    let numerator = a * wad + half_b;
+    numerator / b
+}
+
 /// https://github.com/aave-dao/aave-v3-origin/blob/a0512f8354e97844a3ed819cf4a9a663115b8e20/src/contracts/protocol/libraries/logic/GenericLogic.sol#L249
 async fn get_user_balance_in_base_currency(provider: RootProvider<PubSubFrontend>, reserve: Address, a_token_address: Address, user_address: Address, asset_price: U256, asset_unit: U256) -> U256 {
     let normalized_income = match AaveV3Pool::new(AAVE_V3_POOL_ADDRESS, provider.clone())
@@ -618,10 +628,10 @@ async fn get_user_balance_in_base_currency(provider: RootProvider<PubSubFrontend
         }
     };
 
-    let a_token = ERC20::new(a_token_address, provider);
+    let a_token = IAToken::new(a_token_address, provider);
     // TODO(Hernan): revisit this, because scaledBalanceOf != balanceOf
-    let scaled_balance = match a_token.balanceOf(user_address).call().await {
-        Ok(balance_of_response) => balance_of_response.balance,
+    let scaled_balance = match a_token.scaledBalanceOf(user_address).call().await {
+        Ok(balance_of_response) => balance_of_response._0,
         Err(e) => {
             eprintln!("Error trying to call balanceOf for {}: {}", user_address, e);
             U256::ZERO
@@ -748,6 +758,7 @@ async fn calculate_user_account_data(
         if liquidation_threshold != U256::ZERO && is_using_as_collateral(user_config.data, i) {
             let user_balance_in_base_currency = get_user_balance_in_base_currency(provider.clone(), reserve_address, reserves_data[i].aTokenAddress, user_address, asset_price, asset_unit).await;
             total_collateral_in_base_currency += user_balance_in_base_currency;
+            avg_liquidation_threshold += user_balance_in_base_currency * liquidation_threshold;
         };
 
         // Calculate debt totals
@@ -783,8 +794,21 @@ async fn calculate_user_account_data(
         }
     }
 
+    if total_collateral_in_base_currency != U256::ZERO {
+        avg_liquidation_threshold /= total_collateral_in_base_currency;
+    } else {
+        avg_liquidation_threshold = U256::ZERO;
+    }
+
+    if total_debt_in_base_currency != U256::ZERO {
+        let wad_numerator = percent_mul(total_collateral_in_base_currency, avg_liquidation_threshold);
+        health_factor = wad_div(wad_numerator, total_debt_in_base_currency);
+    } else {
+        health_factor = U256::MAX;
+    }
+
     // Return values
-    user_account_data
+    (total_collateral_in_base_currency, total_debt_in_base_currency, health_factor)
 }
 
 #[tokio::main]
