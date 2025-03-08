@@ -1044,7 +1044,7 @@ async fn main() {
                 Ok(response) => response._0,
                 Err(e) => {
                     eprintln!("Error trying to call collateralAToken.balanceOf(): {}", e);
-                    return U256::ZERO;
+                    U256::ZERO
                 }
             };
             let debt_reserve = reserves_data.iter().find(|agg_reserve_data| agg_reserve_data.underlyingAsset == borrowed_reserve.underlyingAsset).unwrap();
@@ -1053,7 +1053,7 @@ async fn main() {
                 Ok(response) => response.balance,
                 Err(e) => {
                     eprintln!("Error trying to call debt_reserve_token.balanceOf: {}", e);
-                    return U256::ZERO;
+                    U256::ZERO
                 }
             };
             // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L234-L238
