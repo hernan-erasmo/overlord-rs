@@ -578,6 +578,17 @@ fn is_using_as_collateral(user_config: U256, reserve_index: usize) -> bool {
     (shifted & mask) != U256::ZERO
 }
 
+/// https://github.com/aave-dao/aave-v3-origin/blob/a0512f8354e97844a3ed819cf4a9a663115b8e20/src/contracts/protocol/libraries/configuration/UserConfiguration.sol#L87
+fn is_borrowing(user_config: U256, reserve_index: usize) -> bool {
+    // In Solidity: (self.data >> (reserveIndex << 1)) & 1 != 0
+    // This checks only the borrowing bit
+    let shift_amount = reserve_index * 2;  // reserveIndex << 1
+    let shifted = user_config >> shift_amount;
+    let mask = U256::from(1);  // Binary: 1
+
+    (shifted & mask) != U256::ZERO
+}
+
 /// https://github.com/aave-dao/aave-v3-origin/blob/a0512f8354e97844a3ed819cf4a9a663115b8e20/src/contracts/protocol/libraries/math/WadRayMath.sol#L65
 fn ray_mul(a: U256, b: U256) -> U256 {
     let ray: U256 = U256::from_str_radix("1000000000000000000000000000", 10).unwrap();  // 1e27
@@ -708,7 +719,9 @@ async fn calculate_user_account_data(
         };
 
         // Calculate debt totals
+        if is_borrowing(user_config.data, i) {
 
+        }
     }
 
     // Return values
