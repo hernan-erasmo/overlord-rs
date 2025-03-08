@@ -4,30 +4,18 @@ mod constants;
 pub mod sol_bindings;
 mod utils;
 
-use alloy::{
-    providers::RootProvider,
-    pubsub::PubSubFrontend,
-};
-use cache::{
-    PriceCache,
-    ProviderCache,
-};
+use alloy::{providers::RootProvider, pubsub::PubSubFrontend};
+use cache::{PriceCache, ProviderCache};
 use calculations::get_best_debt_collateral_pair;
 use constants::*;
 use overlord_shared_types::UnderwaterUserEvent;
 use sol_bindings::{AaveOracle, AaveUIPoolDataProvider};
-use std::{
-    sync::Arc,
-    time::Instant,
-};
+use std::{sync::Arc, time::Instant};
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use tracing_appender::rolling::{self, Rotation};
 use tracing_subscriber::fmt::{time::LocalTime, writer::BoxMakeWriter};
-use utils::{
-    generate_reserve_details_by_asset,
-    ReserveConfigurationData,
-};
+use utils::{generate_reserve_details_by_asset, ReserveConfigurationData};
 
 fn _setup_logging() {
     let log_file = rolling::RollingFileAppender::new(

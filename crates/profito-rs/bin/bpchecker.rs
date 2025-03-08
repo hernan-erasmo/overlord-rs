@@ -4,28 +4,16 @@ use alloy::{
     pubsub::PubSubFrontend,
 };
 use profito_rs::{
-    calculations::{
-        percent_div,
-        percent_mul,
-    },
+    calculations::{get_best_fee_tier_for_swap, percent_div, percent_mul},
     constants::{
-        AAVE_ORACLE_ADDRESS,
-        AAVE_V3_POOL_ADDRESS,
-        AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS,
-        AAVE_V3_PROVIDER_ADDRESS,
-        AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS,
+        AAVE_ORACLE_ADDRESS, AAVE_V3_POOL_ADDRESS, AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS,
+        AAVE_V3_PROVIDER_ADDRESS, AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS,
     },
     sol_bindings::{
-        AaveOracle,
-        AaveProtocolDataProvider,
-        AaveUIPoolDataProvider,
-        pool::AaveV3Pool,
-        IUiPoolDataProviderV3::UserReserveData,
+        pool::AaveV3Pool, AaveOracle, AaveProtocolDataProvider, AaveUIPoolDataProvider,
+        IUiPoolDataProviderV3::UserReserveData, ERC20,
     },
-    utils::{
-        ReserveConfigurationData,
-        ReserveConfigurationEnhancedData,
-    }
+    utils::{ReserveConfigurationData, ReserveConfigurationEnhancedData},
 };
 use std::{collections::HashMap, env};
 
@@ -288,6 +276,60 @@ async fn get_user_health_factor(provider: RootProvider<PubSubFrontend>, user: Ad
     }
 }
 
+/// This function is the rust equivalent of _calculateDebt() defined in LiquidationLogic.sol
+/// https://github.com/aave/aave-v3-core/blob/b74526a7bc67a3a117a1963fc871b3eb8cea8435/contracts/protocol/libraries/logic/LiquidationLogic.sol#L363
+async fn calculate_debt(
+    provider: RootProvider<PubSubFrontend>,
+    user: Address,
+    debt_asset: Address,
+    user_health_factor: U256,
+) -> (U256, U256, U256) {
+    let pool = AaveV3Pool::new(AAVE_V3_POOL_ADDRESS, provider.clone());
+    let stable_debt_token_address: Address;
+    let variable_debt_token_address: Address;
+    (stable_debt_token_address, variable_debt_token_address) =
+        match pool.getReserveData(debt_asset).call().await {
+            Ok(reserve_data) => (
+                reserve_data._0.stableDebtTokenAddress,
+                reserve_data._0.variableDebtTokenAddress,
+            ),
+            Err(e) => {
+                eprintln!("Error trying to call getUserAccountData: {}", e);
+                std::process::exit(1);
+            }
+        };
+    let stable_debt = ERC20::new(stable_debt_token_address, provider.clone());
+    let variable_debt = ERC20::new(variable_debt_token_address, provider.clone());
+    let user_stable_debt = match stable_debt.balanceOf(user).call().await {
+        Ok(balance_of_return) => balance_of_return.balance,
+        Err(e) => {
+            eprintln!("Failed to get stable debt balance: {}", e);
+            U256::ZERO
+        }
+    };
+    let user_variable_debt = match variable_debt.balanceOf(user).call().await {
+        Ok(balance_of_return) => balance_of_return.balance,
+        Err(e) => {
+            eprintln!("Failed to get variable debt balance: {}", e);
+            U256::ZERO
+        }
+    };
+    let user_total_debt = user_stable_debt + user_variable_debt;
+    let close_factor = if user_health_factor <= U256::from(0.95e18) {
+        U256::from(1e4)
+    } else {
+        U256::from(0.5e4)
+    };
+
+    let max_liquidatable_debt = percent_mul(user_total_debt, close_factor);
+
+    // The solidity function does one more step, and instead of returning max_liquidatable_debt, it checks
+    // if that value is above or below whatever the user called liquidationCall with. This is what makes the "pass
+    // uint(-1) to liquidate max available" possible. We don't need to do that here, as we are only interested in
+    // the amount of debt that can be liquidated.
+    (user_variable_debt, user_total_debt, max_liquidatable_debt)
+}
+
 async fn calculate_pair_profitability(
     provider: RootProvider<PubSubFrontend>,
     borrowed_reserve: UserReserveData,
@@ -353,7 +395,10 @@ async fn calculate_pair_profitability(
         format_units(liquidation_close_factor, 4).unwrap(),
         actual_debt_to_liquidate,
         format_units(
-            borrowed_reserve.scaledVariableDebt * debt_asset_price,
+            percent_mul(
+                borrowed_reserve.scaledVariableDebt,
+                liquidation_close_factor
+            ) * debt_asset_price,
             debt_asset_decimals + 8
         )
         .unwrap(),
@@ -477,14 +522,27 @@ async fn calculate_pair_profitability(
     println!("\t\t\t-------------------------------------------------");
     println!("\t\t\t{} x {}", collateral_asset_price, debt_asset_unit);
 
-    // THIS IS WHAT WE MUST OPTIMIZE FOR
-    let net_profit = actual_collateral_to_liquidate - debt_in_collateral_units;
+    // THIS IS THE CORE OF THE CALCULATION, WHAT DECIDES WHETHER OR NOT WE MOVE ON WITH THE EXECUTION
+    let gas_used_estimation = U256::from(1000000); // TODO(Hernan): good-enough this
+    let gas_price_in_gwei = match provider.get_gas_price().await {
+        Ok(price) => U256::from(price) / U256::from(1e3),
+        Err(e) => U256::MAX,
+    };
+    let execution_gas_cost = (gas_used_estimation * gas_price_in_gwei) / U256::from(1000000);
+    let swap_loss_factor = U256::from(10000); // this assumes we will swap in 1% fee pools (could be more sophisticated)
+    let swap_total_cost = actual_collateral_to_liquidate
+        - percent_div(actual_collateral_to_liquidate, swap_loss_factor);
+    let net_profit = actual_collateral_to_liquidate - // This already has the liquidation fee deducted
+        debt_in_collateral_units -
+        execution_gas_cost -
+        swap_total_cost;
 
     println!(
-        "\t\tnet profit (collateral reward - debt repaid - liq fee) ({} - {} - {})\n\t\t\t{} ($ {})",
+        "\t\tnet profit (collateral reward - debt repaid - swap cost - execution cost) ({} - {} - {} - {})\n\t\t\t{} ($ {})",
         actual_collateral_to_liquidate, // collateral units
-        debt_in_collateral_units, // this ensures debt is in collateral units
-        liquidation_fee, // collateral units
+        debt_in_collateral_units,
+        swap_total_cost,
+        execution_gas_cost,
         net_profit,
         format_units(net_profit * collateral_asset_price, collateral_asset_decimals + 8).unwrap(),
     );
@@ -626,9 +684,19 @@ async fn main() {
             );
 
             // This is what _calculateDebt() over at LiquidationLogic is supposed to do
-            let actual_debt_to_liquidate = percent_mul(
-                borrowed_reserve.scaledVariableDebt,
-                liquidation_close_factor,
+            let (user_variable_debt, user_total_debt, actual_debt_to_liquidate) = calculate_debt(
+                provider.clone(),
+                user_address,
+                borrowed_reserve.underlyingAsset,
+                user_health_factor,
+            )
+            .await;
+            println!(
+                "\t\t(variable, stable, total, actual) = {}, {}, {}, {}",
+                user_variable_debt,
+                user_total_debt,
+                user_total_debt - user_variable_debt,
+                actual_debt_to_liquidate
             );
 
             // The following is what _calculateAvailableCollateralToLiquidate() over at LiquidationLogic is supposed to do

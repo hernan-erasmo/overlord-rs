@@ -25,9 +25,15 @@ USER_ADDRESS=$1
 BLOCK_NUMBER=$2
 TX_HASH=$3
 ANVIL_IPC="/tmp/bur_anvil_instance.ipc"
+PROVIDER_URL="/tmp/reth.ipc"
+
+# Check if fourth argument exists and matches the flag
+if [ "${4:-}" = "--use-third-party-provider" ]; then
+    PROVIDER_URL="https://eth-mainnet.g.alchemy.com/v2/f48E9HLwDQTbfaoDutz9P07TqfugqApS"
+fi
 
 echo "Building project..."
-if ! cargo build --release --workspace > /dev/null 2>&1; then
+if ! cargo build --release --bin bpchecker > /dev/null 2>&1; then
     echo "Error: Build failed"
     exit 1
 fi
@@ -35,10 +41,10 @@ fi
 # Start anvil with appropriate parameters
 if [ -n "$BLOCK_NUMBER" ]; then
     echo "Starting anvil with block number $BLOCK_NUMBER..."
-    anvil --ipc $ANVIL_IPC --fork-url /tmp/reth.ipc --fork-block-number "$BLOCK_NUMBER" > /dev/null 2>&1 &
+    anvil --ipc $ANVIL_IPC --fork-url $PROVIDER_URL --fork-block-number "$BLOCK_NUMBER" > /dev/null 2>&1 &
 else
     echo "Starting anvil at latest block..."
-    anvil --ipc $ANVIL_IPC --fork-url /tmp/reth.ipc > /dev/null 2>&1 &
+    anvil --ipc $ANVIL_IPC --fork-url $PROVIDER_URL > /dev/null 2>&1 &
 fi
 
 ANVIL_PID=$!
@@ -88,7 +94,7 @@ if [ -n "$TX_HASH" ]; then
     PRICE_UPDATE_TX=$TX_HASH
 
     # Get the block number of the transaction
-    TX_BLOCK_NUMBER=$(cast tx --rpc-url /tmp/reth.ipc $PRICE_UPDATE_TX blockNumber)
+    TX_BLOCK_NUMBER=$(cast tx --rpc-url $PROVIDER_URL $PRICE_UPDATE_TX blockNumber)
 
     # Validate block number
     if [ -n "$BLOCK_NUMBER" ] && [ "$BLOCK_NUMBER" -ge "$TX_BLOCK_NUMBER" ]; then
@@ -98,9 +104,9 @@ if [ -n "$TX_HASH" ]; then
     fi
 
     # Extract transaction details
-    PRICE_UPDATE_TO=$(cast tx --rpc-url /tmp/reth.ipc $PRICE_UPDATE_TX to)
-    PRICE_UPDATE_TX_INPUT=$(cast tx --rpc-url /tmp/reth.ipc $PRICE_UPDATE_TX input)
-    PRICE_UPDATE_FROM=$(cast tx --rpc-url /tmp/reth.ipc $PRICE_UPDATE_TX from)
+    PRICE_UPDATE_TO=$(cast tx --rpc-url $PROVIDER_URL $PRICE_UPDATE_TX to)
+    PRICE_UPDATE_TX_INPUT=$(cast tx --rpc-url $PROVIDER_URL $PRICE_UPDATE_TX input)
+    PRICE_UPDATE_FROM=$(cast tx --rpc-url $PROVIDER_URL $PRICE_UPDATE_TX from)
 
     # Impersonate account
     IMPERSONATE_RESULT=$(cast rpc anvil_impersonateAccount $PRICE_UPDATE_FROM --rpc-url $ANVIL_IPC)

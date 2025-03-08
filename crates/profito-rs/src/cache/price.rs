@@ -1,3 +1,4 @@
+use super::super::sol_bindings::AaveOracle;
 use alloy::{
     primitives::{Address, U256},
     providers::RootProvider,
@@ -7,7 +8,6 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     sync::Arc,
 };
-use super::super::sol_bindings::AaveOracle;
 use tracing::{info, warn};
 
 #[derive(Debug, Clone)]
