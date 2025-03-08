@@ -559,23 +559,27 @@ async fn calculate_pair_profitability(
 /// This is the equivalent of _calculateUserAccountData() in LiquidationLogic.sol
 /// https://github.com/aave-dao/aave-v3-origin/blob/bb6ea42947f349fe8182a0ea30c5a7883d1f9ed1/src/contracts/protocol/libraries/logic/GenericLogic.sol#L63
 /// except for emode support. We don't do that here.
-async fn calculate_user_account_data(provider: RootProvider<PubSubFrontend>, user_address: Address) -> (U256, U256, U256) {
+async fn calculate_user_account_data(
+    provider: RootProvider<PubSubFrontend>,
+    user_address: Address,
+) -> (U256, U256, U256) {
     /*
         mapping(address => DataTypes.ReserveData) storage reservesData,
         DataTypes.CalculateUserAccountDataParams memory params
     */
     let mut user_account_data: (U256, U256, U256) = (U256::ZERO, U256::ZERO, U256::ZERO);
-    let reserves_data = match AaveUIPoolDataProvider::new(AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, provider.clone())
-        .getReservesData(AAVE_V3_PROVIDER_ADDRESS)
-        .call()
-        .await
-    {
-        Ok(reserves_list) => reserves_list._0,
-        Err(e) => {
-            eprintln!("Error trying to call getReservesData: {}", e);
-            return user_account_data;
-        }
-    };
+    let reserves_data =
+        match AaveUIPoolDataProvider::new(AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, provider.clone())
+            .getReservesData(AAVE_V3_PROVIDER_ADDRESS)
+            .call()
+            .await
+        {
+            Ok(reserves_list) => reserves_list._0,
+            Err(e) => {
+                eprintln!("Error trying to call getReservesData: {}", e);
+                return user_account_data;
+            }
+        };
     user_account_data
 }
 
