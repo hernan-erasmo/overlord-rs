@@ -1,4 +1,5 @@
 use alloy::{
+    sol_types::sol,
     primitives::{address, utils::format_units, Address, U256},
     providers::{IpcConnect, Provider, ProviderBuilder, RootProvider},
     pubsub::PubSubFrontend,
@@ -10,8 +11,7 @@ use profito_rs::{
         AAVE_V3_PROVIDER_ADDRESS, AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS,
     },
     sol_bindings::{
-        pool::AaveV3Pool, AaveOracle, AaveProtocolDataProvider, AaveUIPoolDataProvider,
-        IUiPoolDataProviderV3::UserReserveData, ERC20,
+        pool::AaveV3Pool, AaveOracle, AaveProtocolDataProvider, AaveUIPoolDataProvider, IAToken, IUiPoolDataProviderV3::UserReserveData, ERC20
     },
     utils::{ReserveConfigurationData, ReserveConfigurationEnhancedData},
 };
@@ -604,6 +604,7 @@ fn ray_mul(a: U256, b: U256) -> U256 {
     with_half / ray
 }
 
+/// https://github.com/aave-dao/aave-v3-origin/blob/a0512f8354e97844a3ed819cf4a9a663115b8e20/src/contracts/protocol/libraries/logic/GenericLogic.sol#L249
 async fn get_user_balance_in_base_currency(provider: RootProvider<PubSubFrontend>, reserve: Address, a_token_address: Address, user_address: Address, asset_price: U256, asset_unit: U256) -> U256 {
     let normalized_income = match AaveV3Pool::new(AAVE_V3_POOL_ADDRESS, provider.clone())
         .getReserveNormalizedIncome(reserve)
@@ -618,6 +619,7 @@ async fn get_user_balance_in_base_currency(provider: RootProvider<PubSubFrontend
     };
 
     let a_token = ERC20::new(a_token_address, provider);
+    // TODO(Hernan): revisit this, because scaledBalanceOf != balanceOf
     let scaled_balance = match a_token.balanceOf(user_address).call().await {
         Ok(balance_of_response) => balance_of_response.balance,
         Err(e) => {
@@ -630,6 +632,35 @@ async fn get_user_balance_in_base_currency(provider: RootProvider<PubSubFrontend
     balance / asset_unit
 }
 
+/// https://github.com/aave-dao/aave-v3-origin/blob/a0512f8354e97844a3ed819cf4a9a663115b8e20/src/contracts/protocol/libraries/logic/GenericLogic.sol#L219
+async fn get_user_debt_in_base_currency(provider: RootProvider<PubSubFrontend>, reserve: Address, variable_debt_token_address: Address, user_address: Address, asset_price: U256, asset_unit: U256) -> U256 {
+    // TODO(Hernan): revisit this, because scaledBalanceOf != balanceOf
+    let variable_debt_token = IAToken::new(variable_debt_token_address, provider.clone());
+    let mut user_total_debt = match variable_debt_token.scaledBalanceOf(user_address).call().await {
+        Ok(balance) => balance._0,
+        Err(e) => {
+            eprintln!("Error getting scaled debt balance: {}", e);
+            return U256::ZERO;
+        }
+    };
+    if user_total_debt == U256::ZERO {
+        return U256::ZERO;
+    }
+    let normalized_debt = match AaveV3Pool::new(AAVE_V3_POOL_ADDRESS, provider.clone())
+        .getReserveNormalizedVariableDebt(reserve)
+        .call()
+        .await
+    {
+        Ok(response) => response._0,
+        Err(e) => {
+            eprintln!("Error trying to call getReserveNormalizedDebt: {}", e);
+            U256::ZERO
+        }
+    };
+    user_total_debt = ray_mul(user_total_debt, normalized_debt) * asset_price;
+    return user_total_debt / asset_unit;
+}
+
 /// This is the equivalent of _calculateUserAccountData() in LiquidationLogic.sol
 /// https://github.com/aave-dao/aave-v3-origin/blob/bb6ea42947f349fe8182a0ea30c5a7883d1f9ed1/src/contracts/protocol/libraries/logic/GenericLogic.sol#L63
 /// except for emode support. We don't do that here.
@@ -640,6 +671,7 @@ async fn calculate_user_account_data(
     // Capture required input arguments
     let mut total_collateral_in_base_currency = U256::ZERO;
     let mut total_debt_in_base_currency = U256::ZERO;
+    let mut avg_liquidation_threshold = U256::ZERO;
     let mut health_factor = U256::ZERO;
     let user_account_data = (total_collateral_in_base_currency, total_debt_in_base_currency, health_factor);
     /*
@@ -720,7 +752,34 @@ async fn calculate_user_account_data(
 
         // Calculate debt totals
         if is_borrowing(user_config.data, i) {
-
+            if match AaveProtocolDataProvider::new(AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS, provider.clone())
+                .getIsVirtualAccActive(reserve_address)
+                .call()
+                .await
+            {
+                Ok(response) => response._0,
+                Err(e) => {
+                    eprintln!("Error trying to call getIsVirtualAccActive: {}", e);
+                    false
+                }
+            } {
+                let user_debt_in_base_currency = get_user_debt_in_base_currency(provider.clone(), reserve_address, reserves_data[i].variableDebtTokenAddress, user_address, asset_price, asset_unit).await;
+                total_debt_in_base_currency += user_debt_in_base_currency;
+            } else {
+                // custom case for GHO, which applies the GHO discount on balanceOf
+                // https://github.com/aave-dao/aave-v3-origin/blob/bb6ea42947f349fe8182a0ea30c5a7883d1f9ed1/src/contracts/protocol/libraries/logic/GenericLogic.sol#L148
+                total_debt_in_base_currency += match ERC20::new(reserves_data[i].variableDebtTokenAddress, provider.clone())
+                    .balanceOf(user_address)
+                    .call()
+                    .await
+                {
+                    Ok(balance_of_response) => balance_of_response.balance,
+                    Err(e) => {
+                        eprintln!("Error trying to call balanceOf for {}: {}", user_address, e);
+                        U256::ZERO
+                    }
+                } * asset_price / asset_unit;
+            }
         }
     }
 
