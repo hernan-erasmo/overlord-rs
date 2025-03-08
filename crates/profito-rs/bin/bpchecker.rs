@@ -556,6 +556,18 @@ async fn calculate_pair_profitability(
     )
 }
 
+/// This is the equivalent of _calculateUserAccountData() in LiquidationLogic.sol
+/// https://github.com/aave-dao/aave-v3-origin/blob/bb6ea42947f349fe8182a0ea30c5a7883d1f9ed1/src/contracts/protocol/libraries/logic/GenericLogic.sol#L63
+async fn calculate_user_account_data(user_address: Address) -> (U256, U256, U256) {
+    /*
+        mapping(address => DataTypes.ReserveData) storage reservesData,
+        mapping(uint256 => address) storage reservesList,
+        mapping(uint8 => DataTypes.EModeCategory) storage eModeCategories,
+        DataTypes.CalculateUserAccountDataParams memory params
+    */
+    (U256::ZERO, U256::ZERO, U256::ZERO)
+}
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = env::args().collect();
@@ -598,7 +610,8 @@ async fn main() {
         .cloned()
         .collect::<Vec<UserReserveData>>();
 
-    // Fetch user health factor
+    // Calculate user account data
+    let user_account_data = calculate_user_account_data(user_address).await;
     let user_health_factor = get_user_health_factor(provider.clone(), user_address).await;
     println!("\n### User HF ###");
     println!("\t {}", format_units(user_health_factor, "eth").unwrap());
