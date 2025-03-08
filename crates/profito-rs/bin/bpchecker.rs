@@ -890,6 +890,25 @@ async fn get_reserves_data(provider: RootProvider<PubSubFrontend>) -> Vec<Aggreg
     }
 }
 
+async fn get_asset_price(
+    provider: RootProvider<PubSubFrontend>,
+    asset: Address,
+) -> U256 {
+    let aave_oracle: AaveOracle::AaveOracleInstance<PubSubFrontend, RootProvider<PubSubFrontend>> =
+        AaveOracle::new(AAVE_ORACLE_ADDRESS, provider.clone());
+    match aave_oracle
+        .getAssetPrice(asset)
+        .call()
+        .await
+    {
+        Ok(price_response) => price_response._0,
+        Err(e) => {
+            eprintln!("Error trying to call getAssetPrice: {}", e);
+            U256::ZERO
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = env::args().collect();
@@ -1057,6 +1076,22 @@ async fn main() {
                 }
             };
             // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L234-L238
+            println!("\t\tv3.3 (user_collateral_balance, user_reserve_debt): {} / {}", user_collateral_balance, user_reserve_debt);
+
+            // begin section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L252-L276
+            // TODO(Hernan): you should at least visually check if liquidationBonus is returning what you're expecting, since
+            // the solidity implementation uses bit masking to get the value.
+            let liquidation_bonus = collateral_reserve.reserveLiquidationBonus;
+            let collateral_asset_price = get_asset_price(provider.clone(), supplied_reserve.underlyingAsset).await;
+            let debt_asset_price = get_asset_price(provider.clone(), borrowed_reserve.underlyingAsset).await;
+            let collateral_asset_unit = collateral_reserve.decimals;
+            let debt_asset_unit = debt_reserve.decimals;
+            let user_reserve_debt_in_base_currency = user_reserve_debt * debt_asset_price / debt_asset_unit;
+            let user_reserve_collateral_in_base_currency = user_collateral_balance * collateral_asset_price / collateral_asset_unit;
+            println!("\t\tv3.3 liquidation_bonus: {}", liquidation_bonus);
+            println!("\t\tv3.3 collateral: (price, unit, in_base_currency): ({}, {}, {})", collateral_asset_price, collateral_asset_unit, user_reserve_collateral_in_base_currency);
+            println!("\t\tv3.3 debt: (price, unit, in_base_currency): ({}, {}, {})", debt_asset_price, debt_asset_unit, user_reserve_debt_in_base_currency);
+            // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L252-L276
 
             // The following is what _calculateAvailableCollateralToLiquidate() over at LiquidationLogic is supposed to do
             let (
