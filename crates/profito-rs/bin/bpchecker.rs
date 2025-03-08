@@ -946,6 +946,24 @@ fn calculate_actual_debt_to_liquidate(
     max_liquidatable_debt
 }
 
+fn calculate_available_collateral_to_liquidate(
+    provider: RootProvider<PubSubFrontend>,
+    collateral_asset_price: U256,
+    collateral_asset_unit: U256,
+    debt_asset_price: U256,
+    debt_asset_unit: U256,
+    mut actual_debt_to_liquidate: U256,
+    user_collateral_balance: U256,
+    liquidation_bonus: U256,
+) -> (U256, U256, U256, U256) {
+    let mut collateralAmount = U256::ZERO;
+    let mut debt_amount_needed= U256::ZERO;
+    let mut liquidation_protocol_fee = U256::ZERO;
+    let mut collateral_to_liquidate_in_base_currency = U256::ZERO;
+
+    (collateralAmount, debt_amount_needed, liquidation_protocol_fee, collateral_to_liquidate_in_base_currency)
+}
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = env::args().collect();
@@ -1131,7 +1149,7 @@ async fn main() {
             // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L252-L276
 
             // begin section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L278-L302
-            let actual_debt_to_liquidate = calculate_actual_debt_to_liquidate(
+            let mut actual_debt_to_liquidate = calculate_actual_debt_to_liquidate(
                 user_reserve_debt,
                 user_reserve_collateral_in_base_currency,
                 user_reserve_debt_in_base_currency,
@@ -1142,6 +1160,24 @@ async fn main() {
             );
             println!("\t\tv3.3 actual debt to liquidate: {}", actual_debt_to_liquidate);
             // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L278-L302
+
+            // begin section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L309
+            let (
+                actual_collateral_to_liquidate,
+                actual_debt_to_liquidate,
+                liquidation_protocol_fee_amount,
+                collateral_to_liquidate_in_base_currency
+            ) = calculate_available_collateral_to_liquidate(
+                provider.clone(),
+                collateral_asset_price,
+                collateral_asset_unit,
+                debt_asset_price,
+                debt_asset_unit,
+                actual_debt_to_liquidate,
+                user_collateral_balance,
+                liquidation_bonus
+            );
+            // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L309
 
             // The following is what _calculateAvailableCollateralToLiquidate() over at LiquidationLogic is supposed to do
             let (
