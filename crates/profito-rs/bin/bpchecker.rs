@@ -556,6 +556,17 @@ async fn calculate_pair_profitability(
     )
 }
 
+/// https://github.com/aave-dao/aave-v3-origin/blob/a0512f8354e97844a3ed819cf4a9a663115b8e20/src/contracts/protocol/libraries/configuration/UserConfiguration.sol#L71
+fn is_using_as_collateral_or_borrowing(user_config: U256, reserve_index: usize) -> bool {
+    // In Solidity: (self.data >> (reserveIndex << 1)) & 3 != 0
+    // This checks both collateral AND borrowing bits
+    let shift_amount = reserve_index * 2;  // reserveIndex << 1
+    let shifted = user_config >> shift_amount;
+    let mask = U256::from(3);  // Binary: 11
+
+    (shifted & mask) != U256::ZERO
+}
+
 /// This is the equivalent of _calculateUserAccountData() in LiquidationLogic.sol
 /// https://github.com/aave-dao/aave-v3-origin/blob/bb6ea42947f349fe8182a0ea30c5a7883d1f9ed1/src/contracts/protocol/libraries/logic/GenericLogic.sol#L63
 /// except for emode support. We don't do that here.
@@ -563,10 +574,7 @@ async fn calculate_user_account_data(
     provider: RootProvider<PubSubFrontend>,
     user_address: Address,
 ) -> (U256, U256, U256) {
-    /*
-        mapping(address => DataTypes.ReserveData) storage reservesData,
-        DataTypes.UserConfigurationMap storage userConfig = usersConfig[params.user];
-    */
+    // Capture required input arguments
     let mut user_account_data: (U256, U256, U256) = (U256::ZERO, U256::ZERO, U256::ZERO);
     let reserves_data =
         match AaveUIPoolDataProvider::new(AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, provider.clone())
@@ -580,6 +588,17 @@ async fn calculate_user_account_data(
                 return user_account_data;
             }
         };
+    let reserves_list = match AaveV3Pool::new(AAVE_V3_POOL_ADDRESS, provider.clone())
+        .getReservesList()
+        .call()
+        .await
+    {
+        Ok(reserves_list) => reserves_list._0,
+        Err(e) => {
+            eprintln!("Error trying to call getReservesList: {}", e);
+            return user_account_data;
+        }
+    };
     let user_config = match AaveV3Pool::new(AAVE_V3_POOL_ADDRESS, provider.clone())
         .getUserConfiguration(user_address)
         .call()
@@ -591,6 +610,15 @@ async fn calculate_user_account_data(
             return user_account_data;
         }
     };
+
+    // Operate
+    for (i, reserve_address) in reserves_list.into_iter().enumerate() {
+        if !is_using_as_collateral_or_borrowing(user_config.data, i) {
+            continue;
+        }
+    }
+
+    // Return values
     user_account_data
 }
 
