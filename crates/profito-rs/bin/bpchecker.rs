@@ -11,8 +11,10 @@ use profito_rs::{
         AAVE_V3_PROVIDER_ADDRESS, AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS,
     },
     sol_bindings::{
-        pool::AaveV3Pool, AaveOracle, AaveProtocolDataProvider, AaveUIPoolDataProvider, IAToken,
-        IUiPoolDataProviderV3::{AggregatedReserveData, UserReserveData}, ERC20,
+        pool::AaveV3Pool,
+        AaveOracle, AaveProtocolDataProvider, AaveUIPoolDataProvider, IAToken,
+        IUiPoolDataProviderV3::{AggregatedReserveData, UserReserveData},
+        ERC20,
     },
     utils::{ReserveConfigurationData, ReserveConfigurationEnhancedData},
 };
@@ -890,17 +892,10 @@ async fn get_reserves_data(provider: RootProvider<PubSubFrontend>) -> Vec<Aggreg
     }
 }
 
-async fn get_asset_price(
-    provider: RootProvider<PubSubFrontend>,
-    asset: Address,
-) -> U256 {
+async fn get_asset_price(provider: RootProvider<PubSubFrontend>, asset: Address) -> U256 {
     let aave_oracle: AaveOracle::AaveOracleInstance<PubSubFrontend, RootProvider<PubSubFrontend>> =
         AaveOracle::new(AAVE_ORACLE_ADDRESS, provider.clone());
-    match aave_oracle
-        .getAssetPrice(asset)
-        .call()
-        .await
-    {
+    match aave_oracle.getAssetPrice(asset).call().await {
         Ok(price_response) => price_response._0,
         Err(e) => {
             eprintln!("Error trying to call getAssetPrice: {}", e);
@@ -916,7 +911,7 @@ fn calculate_actual_debt_to_liquidate(
     health_factor_v33: U256,
     total_debt_in_base_currency: U256,
     debt_asset_unit: U256,
-    debt_asset_price: U256
+    debt_asset_price: U256,
 ) -> U256 {
     let MIN_BASE_MAX_CLOSE_FACTOR_THRESHOLD = U256::from(2000e8);
     let CLOSE_FACTOR_HF_THRESHOLD = U256::from(0.95e18);
@@ -927,15 +922,21 @@ fn calculate_actual_debt_to_liquidate(
 
     // but if debt and collateral are above or equal MIN_BASE_MAX_CLOSE_FACTOR_THRESHOLD
     // and health factor is above CLOSE_FACTOR_HF_THRESHOLD this amount may be adjusted
-    if user_reserve_collateral_in_base_currency >= MIN_BASE_MAX_CLOSE_FACTOR_THRESHOLD &&
-        user_reserve_debt_in_base_currency >= MIN_BASE_MAX_CLOSE_FACTOR_THRESHOLD &&
-        health_factor_v33 >= CLOSE_FACTOR_HF_THRESHOLD {
-        let total_default_liquidatable_debt_in_base_currency = percent_mul(total_debt_in_base_currency, DEFAULT_LIQUIDATION_CLOSE_FACTOR);
+    if user_reserve_collateral_in_base_currency >= MIN_BASE_MAX_CLOSE_FACTOR_THRESHOLD
+        && user_reserve_debt_in_base_currency >= MIN_BASE_MAX_CLOSE_FACTOR_THRESHOLD
+        && health_factor_v33 >= CLOSE_FACTOR_HF_THRESHOLD
+    {
+        let total_default_liquidatable_debt_in_base_currency = percent_mul(
+            total_debt_in_base_currency,
+            DEFAULT_LIQUIDATION_CLOSE_FACTOR,
+        );
 
         // if the debt is more than the DEFAULT_LIQUIDATION_CLOSE_FACTOR % of the whole,
         // then we CAN liquidate only up to DEFAULT_LIQUIDATION_CLOSE_FACTOR %
         if user_reserve_debt_in_base_currency > total_default_liquidatable_debt_in_base_currency {
-            max_liquidatable_debt = (total_default_liquidatable_debt_in_base_currency * debt_asset_unit) / debt_asset_price;
+            max_liquidatable_debt = (total_default_liquidatable_debt_in_base_currency
+                * debt_asset_unit)
+                / debt_asset_price;
             println!("\t\tv3.3 partial max liquidatable debt (total_d * debt_unit) / debt_price = {} * {} / {} = {}", total_default_liquidatable_debt_in_base_currency, debt_asset_unit, debt_asset_price, max_liquidatable_debt);
         }
     }
@@ -960,37 +961,55 @@ async fn calculate_available_collateral_to_liquidate(
     liquidation_bonus: U256,
 ) -> (U256, U256, U256, U256) {
     let mut collateral_amount = U256::ZERO;
-    let mut debt_amount_needed= U256::ZERO;
+    let mut debt_amount_needed = U256::ZERO;
     let mut liquidation_protocol_fee = U256::ZERO;
     let mut collateral_to_liquidate_in_base_currency = U256::ZERO;
 
-    let protocol = AaveProtocolDataProvider::new(AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS, provider.clone());
-    let liquidation_protocol_fee_percentage = match protocol.getLiquidationProtocolFee(collateral_asset).call().await {
+    let protocol =
+        AaveProtocolDataProvider::new(AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS, provider.clone());
+    let liquidation_protocol_fee_percentage = match protocol
+        .getLiquidationProtocolFee(collateral_asset)
+        .call()
+        .await
+    {
         Ok(response) => response._0,
         Err(e) => {
             eprintln!("Error trying to call collateralAToken.balanceOf(): {}", e);
             U256::ZERO
         }
     };
-    let base_collateral = (debt_asset_price * debt_to_cover * collateral_asset_unit) / (collateral_asset_price * debt_asset_unit);
+    let base_collateral = (debt_asset_price * debt_to_cover * collateral_asset_unit)
+        / (collateral_asset_price * debt_asset_unit);
     let max_collateral_to_liquidate = percent_mul(base_collateral, liquidation_bonus);
 
     if max_collateral_to_liquidate > user_collateral_balance {
         collateral_amount = user_collateral_balance;
-        debt_amount_needed = (collateral_asset_price * collateral_amount * debt_asset_unit) / percent_div((debt_asset_price * collateral_asset_unit), liquidation_bonus)
+        debt_amount_needed = (collateral_asset_price * collateral_amount * debt_asset_unit)
+            / percent_div(
+                (debt_asset_price * collateral_asset_unit),
+                liquidation_bonus,
+            )
     } else {
         collateral_amount = max_collateral_to_liquidate;
         debt_amount_needed = debt_to_cover;
     }
 
-    collateral_to_liquidate_in_base_currency = (collateral_amount * collateral_asset_price) / collateral_asset_unit;
+    collateral_to_liquidate_in_base_currency =
+        (collateral_amount * collateral_asset_price) / collateral_asset_unit;
     if liquidation_protocol_fee_percentage != U256::ZERO {
-        let bonus_collateral = collateral_amount - percent_div(collateral_amount, liquidation_bonus);
-        liquidation_protocol_fee = percent_mul(bonus_collateral, liquidation_protocol_fee_percentage);
+        let bonus_collateral =
+            collateral_amount - percent_div(collateral_amount, liquidation_bonus);
+        liquidation_protocol_fee =
+            percent_mul(bonus_collateral, liquidation_protocol_fee_percentage);
         collateral_amount -= liquidation_protocol_fee;
     }
 
-    (collateral_amount, debt_amount_needed, liquidation_protocol_fee, collateral_to_liquidate_in_base_currency)
+    (
+        collateral_amount,
+        debt_amount_needed,
+        liquidation_protocol_fee,
+        collateral_to_liquidate_in_base_currency,
+    )
 }
 
 #[tokio::main]
@@ -1045,7 +1064,13 @@ async fn main() {
 
     // Calculate user account data
     let (total_collateral_in_base_currency, total_debt_in_base_currency, health_factor_v33) =
-        calculate_user_account_data(provider.clone(), user_address, reserves_list.clone(), reserves_data.clone()).await;
+        calculate_user_account_data(
+            provider.clone(),
+            user_address,
+            reserves_list.clone(),
+            reserves_data.clone(),
+        )
+        .await;
     println!("\n### User HF (value calculated with v3.3) ###");
     println!(
         "\t Total collateral (in base units): {}",
@@ -1141,17 +1166,30 @@ async fn main() {
             );
 
             // begin section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L234-L238
-            let collateral_reserve = reserves_data.iter().find(|agg_reserve_data| agg_reserve_data.underlyingAsset == supplied_reserve.underlyingAsset).unwrap();
-            let collateral_a_token = IAToken::new(collateral_reserve.aTokenAddress, provider.clone());
-            let user_collateral_balance = match collateral_a_token.balanceOf(user_address).call().await {
-                Ok(response) => response._0,
-                Err(e) => {
-                    eprintln!("Error trying to call collateralAToken.balanceOf(): {}", e);
-                    U256::ZERO
-                }
-            };
-            let debt_reserve = reserves_data.iter().find(|agg_reserve_data| agg_reserve_data.underlyingAsset == borrowed_reserve.underlyingAsset).unwrap();
-            let debt_reserve_token = ERC20::new(debt_reserve.variableDebtTokenAddress, provider.clone());
+            let collateral_reserve = reserves_data
+                .iter()
+                .find(|agg_reserve_data| {
+                    agg_reserve_data.underlyingAsset == supplied_reserve.underlyingAsset
+                })
+                .unwrap();
+            let collateral_a_token =
+                IAToken::new(collateral_reserve.aTokenAddress, provider.clone());
+            let user_collateral_balance =
+                match collateral_a_token.balanceOf(user_address).call().await {
+                    Ok(response) => response._0,
+                    Err(e) => {
+                        eprintln!("Error trying to call collateralAToken.balanceOf(): {}", e);
+                        U256::ZERO
+                    }
+                };
+            let debt_reserve = reserves_data
+                .iter()
+                .find(|agg_reserve_data| {
+                    agg_reserve_data.underlyingAsset == borrowed_reserve.underlyingAsset
+                })
+                .unwrap();
+            let debt_reserve_token =
+                ERC20::new(debt_reserve.variableDebtTokenAddress, provider.clone());
             let user_reserve_debt = match debt_reserve_token.balanceOf(user_address).call().await {
                 Ok(response) => response.balance,
                 Err(e) => {
@@ -1160,21 +1198,36 @@ async fn main() {
                 }
             };
             // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L234-L238
-            println!("\t\tv3.3 (user_collateral_balance, user_reserve_debt): {} / {}", user_collateral_balance, user_reserve_debt);
+            println!(
+                "\t\tv3.3 (user_collateral_balance, user_reserve_debt): {} / {}",
+                user_collateral_balance, user_reserve_debt
+            );
 
             // begin section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L252-L276
             // TODO(Hernan): you should at least visually check if liquidationBonus is returning what you're expecting, since
             // the solidity implementation uses bit masking to get the value.
             let liquidation_bonus = collateral_reserve.reserveLiquidationBonus;
-            let collateral_asset_price = get_asset_price(provider.clone(), supplied_reserve.underlyingAsset).await;
-            let debt_asset_price = get_asset_price(provider.clone(), borrowed_reserve.underlyingAsset).await;
+            let collateral_asset_price =
+                get_asset_price(provider.clone(), supplied_reserve.underlyingAsset).await;
+            let debt_asset_price =
+                get_asset_price(provider.clone(), borrowed_reserve.underlyingAsset).await;
             let collateral_asset_unit = U256::from(10).pow(collateral_reserve.decimals);
             let debt_asset_unit = U256::from(10).pow(debt_reserve.decimals);
-            let user_reserve_debt_in_base_currency = user_reserve_debt * debt_asset_price / debt_asset_unit;
-            let user_reserve_collateral_in_base_currency = user_collateral_balance * collateral_asset_price / collateral_asset_unit;
+            let user_reserve_debt_in_base_currency =
+                user_reserve_debt * debt_asset_price / debt_asset_unit;
+            let user_reserve_collateral_in_base_currency =
+                user_collateral_balance * collateral_asset_price / collateral_asset_unit;
             println!("\t\tv3.3 liquidation_bonus: {}", liquidation_bonus);
-            println!("\t\tv3.3 collateral: (price, unit, in_base_currency): ({}, {}, {})", collateral_asset_price, collateral_asset_unit, user_reserve_collateral_in_base_currency);
-            println!("\t\tv3.3 debt: (price, unit, in_base_currency): ({}, {}, {})", debt_asset_price, debt_asset_unit, user_reserve_debt_in_base_currency);
+            println!(
+                "\t\tv3.3 collateral: (price, unit, in_base_currency): ({}, {}, {})",
+                collateral_asset_price,
+                collateral_asset_unit,
+                user_reserve_collateral_in_base_currency
+            );
+            println!(
+                "\t\tv3.3 debt: (price, unit, in_base_currency): ({}, {}, {})",
+                debt_asset_price, debt_asset_unit, user_reserve_debt_in_base_currency
+            );
             // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L252-L276
 
             // begin section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L278-L302
@@ -1187,7 +1240,10 @@ async fn main() {
                 debt_asset_unit,
                 debt_asset_price,
             );
-            println!("\t\tv3.3 actual debt to liquidate: {}", actual_debt_to_liquidate);
+            println!(
+                "\t\tv3.3 actual debt to liquidate: {}",
+                actual_debt_to_liquidate
+            );
             // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L278-L302
 
             // begin section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L309
@@ -1195,7 +1251,7 @@ async fn main() {
                 actual_collateral_to_liquidate,
                 actual_debt_to_liquidate,
                 liquidation_protocol_fee_amount,
-                collateral_to_liquidate_in_base_currency
+                collateral_to_liquidate_in_base_currency,
             ) = calculate_available_collateral_to_liquidate(
                 provider.clone(),
                 collateral_reserve.underlyingAsset,
@@ -1205,11 +1261,12 @@ async fn main() {
                 debt_asset_unit,
                 actual_debt_to_liquidate,
                 user_collateral_balance,
-                liquidation_bonus
-            ).await;
+                liquidation_bonus,
+            )
+            .await;
             println!("\t\tv3.3 actual collateral to liquidate, actual debt to liquidate, fee amount, collateral to liquidate in base currency = {} / {} / {} / {}", actual_collateral_to_liquidate, actual_debt_to_liquidate, liquidation_protocol_fee_amount, collateral_to_liquidate_in_base_currency);
             // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L309
-            
+
             let net_profit = U256::ZERO;
             if net_profit > best_pair.as_ref().map_or(U256::ZERO, |p| p.net_profit) {
                 best_pair = Some(BestPair {
