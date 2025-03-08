@@ -951,6 +951,7 @@ fn calculate_actual_debt_to_liquidate(
 async fn calculate_available_collateral_to_liquidate(
     provider: RootProvider<PubSubFrontend>,
     collateral_asset: Address,
+    collateral_decimals: U256,
     // all original args for this function under this line
     collateral_asset_price: U256,
     collateral_asset_unit: U256,
@@ -1003,6 +1004,31 @@ async fn calculate_available_collateral_to_liquidate(
             percent_mul(bonus_collateral, liquidation_protocol_fee_percentage);
         collateral_amount -= liquidation_protocol_fee;
     }
+
+    // THIS IS THE CORE OF THE CALCULATION, WHAT DECIDES WHETHER OR NOT WE MOVE ON WITH THE EXECUTION
+    // this section doesn't belong to the original solidity function
+    let debt_in_collateral_units =
+    (debt_amount_needed * debt_asset_price * collateral_asset_unit)
+        / (collateral_asset_price * debt_asset_unit);
+    let gas_used_estimation = U256::from(1000000); // TODO(Hernan): good-enough this
+    let gas_price_in_gwei = match provider.get_gas_price().await {
+        Ok(price) => U256::from(price) / U256::from(1e3),
+        Err(e) => U256::MAX,
+    };
+    let execution_gas_cost = (gas_used_estimation * gas_price_in_gwei) / U256::from(1000000);
+    let swap_loss_factor = U256::from(10000); // this assumes we will swap in 1% fee pools (could be more sophisticated)
+    let swap_total_cost = collateral_amount
+        - percent_div(collateral_amount, swap_loss_factor);
+    let base_profit = collateral_amount - debt_in_collateral_units; // This already has the liquidation fee deducted
+    let net_profit = base_profit -
+        execution_gas_cost -
+        swap_total_cost;
+    println!("\t\tv3.3 profit calculation:");
+    println!("\t\t\tbase profit (collateral - debt in collateral units): {} ($ {})", base_profit, format_units(base_profit * collateral_asset_price, 8 + u8::try_from(collateral_decimals).unwrap()).unwrap());
+    println!("\t\t\tdebt in collateral units: {}", debt_in_collateral_units);
+    println!("\t\t\texecution gas cost: {}", execution_gas_cost);
+    println!("\t\t\tswap_total_cost: {}", swap_total_cost);
+    println!("\t\t\tnet profit = col amount - debt in col units - execution cost - swap cost = {} ($ {})", net_profit, format_units(net_profit * collateral_asset_price, 8 + u8::try_from(collateral_decimals).unwrap()).unwrap());
 
     (
         collateral_amount,
@@ -1088,12 +1114,6 @@ async fn main() {
     let user_health_factor = get_user_health_factor(provider.clone(), user_address).await;
     println!("\n### User HF (value GET'd) ###");
     println!("\t {}", format_units(user_health_factor, "eth").unwrap());
-
-    let liquidation_close_factor = if user_health_factor <= U256::from(0.95e18) {
-        U256::from(1e4)
-    } else {
-        U256::from(0.5e4)
-    };
 
     // Print user reserves data
     println!("\n### User DEBT (from getUserReservesData() array) ###");
@@ -1231,7 +1251,7 @@ async fn main() {
             // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L252-L276
 
             // begin section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L278-L302
-            let mut actual_debt_to_liquidate = calculate_actual_debt_to_liquidate(
+            let actual_debt_to_liquidate = calculate_actual_debt_to_liquidate(
                 user_reserve_debt,
                 user_reserve_collateral_in_base_currency,
                 user_reserve_debt_in_base_currency,
@@ -1255,6 +1275,7 @@ async fn main() {
             ) = calculate_available_collateral_to_liquidate(
                 provider.clone(),
                 collateral_reserve.underlyingAsset,
+                collateral_reserve.decimals,
                 collateral_asset_price,
                 collateral_asset_unit,
                 debt_asset_price,
