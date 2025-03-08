@@ -935,7 +935,8 @@ fn calculate_actual_debt_to_liquidate(
         // if the debt is more than the DEFAULT_LIQUIDATION_CLOSE_FACTOR % of the whole,
         // then we CAN liquidate only up to DEFAULT_LIQUIDATION_CLOSE_FACTOR %
         if user_reserve_debt_in_base_currency > total_default_liquidatable_debt_in_base_currency {
-            max_liquidatable_debt = (total_default_liquidatable_debt_in_base_currency * debt_asset_unit) / debt_asset_price
+            max_liquidatable_debt = (total_default_liquidatable_debt_in_base_currency * debt_asset_unit) / debt_asset_price;
+            println!("\t\tv3.3 partial max liquidatable debt (total_d * debt_unit) / debt_price = {} * {} / {} = {}", total_default_liquidatable_debt_in_base_currency, debt_asset_unit, debt_asset_price, max_liquidatable_debt);
         }
     }
 
@@ -1120,8 +1121,8 @@ async fn main() {
             let liquidation_bonus = collateral_reserve.reserveLiquidationBonus;
             let collateral_asset_price = get_asset_price(provider.clone(), supplied_reserve.underlyingAsset).await;
             let debt_asset_price = get_asset_price(provider.clone(), borrowed_reserve.underlyingAsset).await;
-            let collateral_asset_unit = collateral_reserve.decimals;
-            let debt_asset_unit = debt_reserve.decimals;
+            let collateral_asset_unit = U256::from(10).pow(collateral_reserve.decimals);
+            let debt_asset_unit = U256::from(10).pow(debt_reserve.decimals);
             let user_reserve_debt_in_base_currency = user_reserve_debt * debt_asset_price / debt_asset_unit;
             let user_reserve_collateral_in_base_currency = user_collateral_balance * collateral_asset_price / collateral_asset_unit;
             println!("\t\tv3.3 liquidation_bonus: {}", liquidation_bonus);
