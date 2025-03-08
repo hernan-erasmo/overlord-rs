@@ -1010,7 +1010,12 @@ async fn calculate_available_collateral_to_liquidate(
     let debt_in_collateral_units =
     (debt_amount_needed * debt_asset_price * collateral_asset_unit)
         / (collateral_asset_price * debt_asset_unit);
-    let base_profit = collateral_amount - debt_in_collateral_units; // This already has the liquidation fee deducted
+    // This already has the liquidation fee deducted
+    let base_profit = if collateral_amount >= debt_in_collateral_units {
+        collateral_amount - debt_in_collateral_units
+    } else {
+        debt_in_collateral_units - collateral_amount
+    };
 
     // TODO(Hernan): make gas and swap calculations more sophisticated
     let gas_used_estimation = U256::from(1000000);
