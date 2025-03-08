@@ -942,7 +942,7 @@ async fn main() {
 
     // Calculate user account data
     let (total_collateral_in_base_units, total_debt_in_base_units, health_factor_v33) =
-        calculate_user_account_data(provider.clone(), user_address, reserves_list, reserves_data).await;
+        calculate_user_account_data(provider.clone(), user_address, reserves_list.clone(), reserves_data.clone()).await;
     println!("\n### User HF (value calculated with v3.3) ###");
     println!(
         "\t Total collateral (in base units): {}",
@@ -1037,7 +1037,26 @@ async fn main() {
                 reserves_configuration.clone(),
             );
 
-            //let collateral_a_token = IAToken::new()
+            // begin section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L234-L238
+            let collateral_reserve = reserves_data.iter().find(|agg_reserve_data| agg_reserve_data.underlyingAsset == supplied_reserve.underlyingAsset).unwrap();
+            let collateral_a_token = IAToken::new(collateral_reserve.aTokenAddress, provider.clone());
+            let user_collateral_balance = match collateral_a_token.balanceOf(user_address).call().await {
+                Ok(response) => response._0,
+                Err(e) => {
+                    eprintln!("Error trying to call collateralAToken.balanceOf(): {}", e);
+                    return U256::ZERO;
+                }
+            };
+            let debt_reserve = reserves_data.iter().find(|agg_reserve_data| agg_reserve_data.underlyingAsset == borrowed_reserve.underlyingAsset).unwrap();
+            let debt_reserve_token = ERC20::new(debt_reserve.variableDebtTokenAddress, provider.clone());
+            let user_reserve_debt = match debt_reserve_token.balanceOf(user_address).call().await {
+                Ok(response) => response.balance,
+                Err(e) => {
+                    eprintln!("Error trying to call debt_reserve_token.balanceOf: {}", e);
+                    return U256::ZERO;
+                }
+            };
+            // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L234-L238
 
             // The following is what _calculateAvailableCollateralToLiquidate() over at LiquidationLogic is supposed to do
             let (
