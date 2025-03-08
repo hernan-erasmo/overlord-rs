@@ -909,6 +909,42 @@ async fn get_asset_price(
     }
 }
 
+fn calculate_actual_debt_to_liquidate(
+    user_reserve_debt: U256,
+    user_reserve_collateral_in_base_currency: U256,
+    user_reserve_debt_in_base_currency: U256,
+    health_factor_v33: U256,
+    total_debt_in_base_currency: U256,
+    debt_asset_unit: U256,
+    debt_asset_price: U256
+) -> U256 {
+    let MIN_BASE_MAX_CLOSE_FACTOR_THRESHOLD = U256::from(2000e8);
+    let CLOSE_FACTOR_HF_THRESHOLD = U256::from(0.95e18);
+    let DEFAULT_LIQUIDATION_CLOSE_FACTOR = U256::from(0.5e4);
+
+    // by default whole debt in the reserve could be liquidated
+    let mut max_liquidatable_debt = user_reserve_debt;
+
+    // but if debt and collateral are above or equal MIN_BASE_MAX_CLOSE_FACTOR_THRESHOLD
+    // and health factor is above CLOSE_FACTOR_HF_THRESHOLD this amount may be adjusted
+    if user_reserve_collateral_in_base_currency >= MIN_BASE_MAX_CLOSE_FACTOR_THRESHOLD &&
+        user_reserve_debt_in_base_currency >= MIN_BASE_MAX_CLOSE_FACTOR_THRESHOLD &&
+        health_factor_v33 >= CLOSE_FACTOR_HF_THRESHOLD {
+        let total_default_liquidatable_debt_in_base_currency = percent_mul(total_debt_in_base_currency, DEFAULT_LIQUIDATION_CLOSE_FACTOR);
+
+        // if the debt is more than the DEFAULT_LIQUIDATION_CLOSE_FACTOR % of the whole,
+        // then we CAN liquidate only up to DEFAULT_LIQUIDATION_CLOSE_FACTOR %
+        if user_reserve_debt_in_base_currency > total_default_liquidatable_debt_in_base_currency {
+            max_liquidatable_debt = (total_default_liquidatable_debt_in_base_currency * debt_asset_unit) / debt_asset_price
+        }
+    }
+
+    // in solidity, there's a check that verifies if what the user send as debtToCover on the liquidationCall
+    // is higher than this and, if it is, then it uses this value instead. We don't care about that because we'll
+    // always want to liquidate as much as possible.
+    max_liquidatable_debt
+}
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = env::args().collect();
@@ -960,16 +996,16 @@ async fn main() {
     let reserves_data = get_reserves_data(provider.clone()).await;
 
     // Calculate user account data
-    let (total_collateral_in_base_units, total_debt_in_base_units, health_factor_v33) =
+    let (total_collateral_in_base_currency, total_debt_in_base_currency, health_factor_v33) =
         calculate_user_account_data(provider.clone(), user_address, reserves_list.clone(), reserves_data.clone()).await;
     println!("\n### User HF (value calculated with v3.3) ###");
     println!(
         "\t Total collateral (in base units): {}",
-        total_collateral_in_base_units
+        total_collateral_in_base_currency
     );
     println!(
         "\t Total debt (in base units): {}",
-        total_debt_in_base_units
+        total_debt_in_base_currency
     );
     println!(
         "\t Health Factor: {}",
@@ -1093,6 +1129,19 @@ async fn main() {
             println!("\t\tv3.3 debt: (price, unit, in_base_currency): ({}, {}, {})", debt_asset_price, debt_asset_unit, user_reserve_debt_in_base_currency);
             // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L252-L276
 
+            // begin section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L278-L302
+            let actual_debt_to_liquidate = calculate_actual_debt_to_liquidate(
+                user_reserve_debt,
+                user_reserve_collateral_in_base_currency,
+                user_reserve_debt_in_base_currency,
+                health_factor_v33,
+                total_debt_in_base_currency,
+                debt_asset_unit,
+                debt_asset_price,
+            );
+            println!("\t\tv3.3 actual debt to liquidate: {}", actual_debt_to_liquidate);
+            // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L278-L302
+
             // The following is what _calculateAvailableCollateralToLiquidate() over at LiquidationLogic is supposed to do
             let (
                 net_profit,
@@ -1105,7 +1154,7 @@ async fn main() {
                 supplied_reserve.clone(),
                 reserves_configuration.clone(),
                 liquidation_close_factor,
-                U256::ZERO // TODO(Hernan), adjust this, which used to be `actual_debt_to_liquidate``,
+                actual_debt_to_liquidate,
             )
             .await;
 
