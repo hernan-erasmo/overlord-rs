@@ -565,7 +565,7 @@ async fn calculate_user_account_data(
 ) -> (U256, U256, U256) {
     /*
         mapping(address => DataTypes.ReserveData) storage reservesData,
-        DataTypes.CalculateUserAccountDataParams memory params
+        DataTypes.UserConfigurationMap storage userConfig = usersConfig[params.user];
     */
     let mut user_account_data: (U256, U256, U256) = (U256::ZERO, U256::ZERO, U256::ZERO);
     let reserves_data =
@@ -580,6 +580,17 @@ async fn calculate_user_account_data(
                 return user_account_data;
             }
         };
+    let user_config = match AaveV3Pool::new(AAVE_V3_POOL_ADDRESS, provider.clone())
+        .getUserConfiguration(user_address)
+        .call()
+        .await
+    {
+        Ok(user_config) => user_config._0,
+        Err(e) => {
+            eprintln!("Error trying to call getUserConfiguration: {}", e);
+            return user_account_data;
+        }
+    };
     user_account_data
 }
 
