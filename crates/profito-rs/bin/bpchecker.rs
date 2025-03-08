@@ -854,9 +854,14 @@ async fn main() {
         .collect::<Vec<UserReserveData>>();
 
     // Calculate user account data
-    let user_account_data = calculate_user_account_data(provider.clone(), user_address).await;
+    let (total_collateral_in_base_units, total_debt_in_base_units, health_factor_v33)= calculate_user_account_data(provider.clone(), user_address).await;
+    println!("\n### User HF (value calculated with v3.3) ###");
+    println!("\t Total collateral (in base units): {}", total_collateral_in_base_units);
+    println!("\t Total debt (in base units): {}", total_debt_in_base_units);
+    println!("\t Health Factor: {}", format_units(health_factor_v33, "eth").unwrap());
+
     let user_health_factor = get_user_health_factor(provider.clone(), user_address).await;
-    println!("\n### User HF ###");
+    println!("\n### User HF (value GET'd) ###");
     println!("\t {}", format_units(user_health_factor, "eth").unwrap());
 
     let liquidation_close_factor = if user_health_factor <= U256::from(0.95e18) {
