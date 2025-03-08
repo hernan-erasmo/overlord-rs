@@ -12,7 +12,7 @@ use profito_rs::{
     },
     sol_bindings::{
         pool::AaveV3Pool, AaveOracle, AaveProtocolDataProvider, AaveUIPoolDataProvider, IAToken,
-        IUiPoolDataProviderV3::UserReserveData, ERC20,
+        IUiPoolDataProviderV3::{AggregatedReserveData, UserReserveData}, ERC20,
     },
     utils::{ReserveConfigurationData, ReserveConfigurationEnhancedData},
 };
@@ -696,6 +696,8 @@ async fn get_user_debt_in_base_currency(
 async fn calculate_user_account_data(
     provider: RootProvider<PubSubFrontend>,
     user_address: Address,
+    reserves_list: Vec<Address>,
+    reserves_data: Vec<AggregatedReserveData>,
 ) -> (U256, U256, U256) {
     // Capture required input arguments
     let mut total_collateral_in_base_currency = U256::ZERO;
@@ -707,37 +709,6 @@ async fn calculate_user_account_data(
         total_debt_in_base_currency,
         health_factor,
     );
-    /*
-       According to https://github.com/aave-dao/aave-v3-origin/blob/a0512f8354e97844a3ed819cf4a9a663115b8e20/src/contracts/protocol/pool/Pool.sol#L532
-       the reserves list is ordered the same way as the _reserveList storage in the Pool contract.
-    */
-    let reserves_list = match AaveV3Pool::new(AAVE_V3_POOL_ADDRESS, provider.clone())
-        .getReservesList()
-        .call()
-        .await
-    {
-        Ok(reserves_list) => reserves_list._0,
-        Err(e) => {
-            eprintln!("Error trying to call getReservesList: {}", e);
-            return user_account_data;
-        }
-    };
-    /*
-       According to https://github.com/aave-dao/aave-v3-origin/blob/a0512f8354e97844a3ed819cf4a9a663115b8e20/src/contracts/helpers/UiPoolDataProviderV3.sol#L45
-       the reserves data is ordered the same way as the reserves list (it actually calls pool.getReservesList() and uses it as index)
-    */
-    let reserves_data =
-        match AaveUIPoolDataProvider::new(AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, provider.clone())
-            .getReservesData(AAVE_V3_PROVIDER_ADDRESS)
-            .call()
-            .await
-        {
-            Ok(reserves_list) => reserves_list._0,
-            Err(e) => {
-                eprintln!("Error trying to call getReservesData: {}", e);
-                return user_account_data;
-            }
-        };
     let user_config = match AaveV3Pool::new(AAVE_V3_POOL_ADDRESS, provider.clone())
         .getUserConfiguration(user_address)
         .call()
@@ -883,6 +854,42 @@ fn print_debt_collateral_title(
     );
 }
 
+async fn get_reserves_list(provider: RootProvider<PubSubFrontend>) -> Vec<Address> {
+    /*
+       According to https://github.com/aave-dao/aave-v3-origin/blob/a0512f8354e97844a3ed819cf4a9a663115b8e20/src/contracts/protocol/pool/Pool.sol#L532
+       the reserves list is ordered the same way as the _reserveList storage in the Pool contract.
+    */
+    match AaveV3Pool::new(AAVE_V3_POOL_ADDRESS, provider.clone())
+        .getReservesList()
+        .call()
+        .await
+    {
+        Ok(reserves_list) => reserves_list._0,
+        Err(e) => {
+            eprintln!("Error trying to call getReservesList: {}", e);
+            return Vec::new();
+        }
+    }
+}
+
+async fn get_reserves_data(provider: RootProvider<PubSubFrontend>) -> Vec<AggregatedReserveData> {
+    /*
+       According to https://github.com/aave-dao/aave-v3-origin/blob/a0512f8354e97844a3ed819cf4a9a663115b8e20/src/contracts/helpers/UiPoolDataProviderV3.sol#L45
+       the reserves data is ordered the same way as the reserves list (it actually calls pool.getReservesList() and uses it as index)
+    */
+    match AaveUIPoolDataProvider::new(AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, provider.clone())
+        .getReservesData(AAVE_V3_PROVIDER_ADDRESS)
+        .call()
+        .await
+    {
+        Ok(reserves_list) => reserves_list._0,
+        Err(e) => {
+            eprintln!("Error trying to call getReservesData: {}", e);
+            return Vec::new();
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = env::args().collect();
@@ -925,9 +932,17 @@ async fn main() {
         .cloned()
         .collect::<Vec<UserReserveData>>();
 
+    // Get reserves data (not to be confused with UserReserveData) and reserves_list, which are aligned
+    // (read `calculate_user_account_data()` comments about what this means)
+    // `reserves_data` is Vec<AggregatedReserveData> and holds information about reserves in general,
+    // while `user_reserves_data` holds information about a particular user's reserves
+    // they're not the same
+    let reserves_list = get_reserves_list(provider.clone()).await;
+    let reserves_data = get_reserves_data(provider.clone()).await;
+
     // Calculate user account data
     let (total_collateral_in_base_units, total_debt_in_base_units, health_factor_v33) =
-        calculate_user_account_data(provider.clone(), user_address).await;
+        calculate_user_account_data(provider.clone(), user_address, reserves_list, reserves_data).await;
     println!("\n### User HF (value calculated with v3.3) ###");
     println!(
         "\t Total collateral (in base units): {}",
@@ -1013,6 +1028,7 @@ async fn main() {
             .iter()
             .filter(|r| r.scaledATokenBalance > U256::from(0) && r.usageAsCollateralEnabledOnUser)
         {
+            // 2/5) WETH (debt) -> WBTC (collateral):
             print_debt_collateral_title(
                 total_combinations,
                 current_count,
@@ -1021,21 +1037,7 @@ async fn main() {
                 reserves_configuration.clone(),
             );
 
-            // This is what _calculateDebt() over at LiquidationLogic is supposed to do
-            let (user_variable_debt, user_total_debt, actual_debt_to_liquidate) = calculate_debt(
-                provider.clone(),
-                user_address,
-                borrowed_reserve.underlyingAsset,
-                user_health_factor,
-            )
-            .await;
-            println!(
-                "\t\t(variable, stable, total, actual) = {}, {}, {}, {}",
-                user_variable_debt,
-                user_total_debt,
-                user_total_debt - user_variable_debt,
-                actual_debt_to_liquidate
-            );
+            //let collateral_a_token = IAToken::new()
 
             // The following is what _calculateAvailableCollateralToLiquidate() over at LiquidationLogic is supposed to do
             let (
@@ -1049,7 +1051,7 @@ async fn main() {
                 supplied_reserve.clone(),
                 reserves_configuration.clone(),
                 liquidation_close_factor,
-                actual_debt_to_liquidate,
+                U256::ZERO // TODO(Hernan), adjust this, which used to be `actual_debt_to_liquidate``,
             )
             .await;
 
