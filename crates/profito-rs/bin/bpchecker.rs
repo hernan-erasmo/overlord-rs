@@ -994,6 +994,7 @@ async fn calculate_available_collateral_to_liquidate(
         collateral_amount = max_collateral_to_liquidate;
         debt_amount_needed = debt_to_cover;
     }
+    println!("\t\tv3.3 max collateral to liquidate: {}", max_collateral_to_liquidate);
 
     collateral_to_liquidate_in_base_currency =
         (collateral_amount * collateral_asset_price) / collateral_asset_unit;
@@ -1023,12 +1024,16 @@ async fn calculate_available_collateral_to_liquidate(
         Err(e) => U256::MAX,
     };
     let execution_gas_cost = (gas_used_estimation * gas_price_in_gwei) / U256::from(1000000);
-    let swap_loss_factor = U256::from(10000); // this assumes we will swap in 1% fee pools (could be more sophisticated)
-    let swap_total_cost = collateral_amount - percent_div(collateral_amount, swap_loss_factor);
+    // this assumes we will swap in 1% fee pools (could be more sophisticated)
+    // uniswap v3 fees are represented as hundredths of basis points: 1% == 100; 0,3% == 30; 0,05% == 5; 0,01% == 1
+    let swap_loss_factor = U256::from(100);
+    let swap_total_cost = percent_mul(collateral_amount, swap_loss_factor);
     let net_profit = base_profit - execution_gas_cost - swap_total_cost;
     println!("\t\tv3.3 profit calculation:");
     println!(
-        "\t\t\tbase profit (collateral - debt in collateral units): {} ($ {})",
+        "\t\t\tbase profit = abs(collateral amount - debt in collateral units) = abs({} - {}) = {} ($ {})",
+        collateral_amount,
+        debt_in_collateral_units,
         base_profit,
         format_units(
             base_profit * collateral_asset_price,
@@ -1041,7 +1046,7 @@ async fn calculate_available_collateral_to_liquidate(
         debt_in_collateral_units
     );
     println!("\t\t\texecution gas cost: {}", execution_gas_cost);
-    println!("\t\t\tswap_total_cost: {}", swap_total_cost);
+    println!("\t\t\tswap total cost: {}", swap_total_cost);
     println!("\t\t\tnet profit = col amount - debt in col units - execution cost - swap cost = {} ($ {})", net_profit, format_units(net_profit * collateral_asset_price, 8 + u8::try_from(collateral_decimals).unwrap()).unwrap());
 
     (
