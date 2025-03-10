@@ -1303,7 +1303,7 @@ async fn main() {
             .await;
             println!("\t\tv3.3 actual collateral to liquidate, actual debt to liquidate, fee amount, collateral to liquidate in base currency = {} / {} / {} / {}", actual_collateral_to_liquidate, actual_debt_to_liquidate, liquidation_protocol_fee_amount, collateral_to_liquidate_in_base_currency);
             println!(""); // space before next pair
-                          // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L309
+            // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L309
 
             // begin section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L320-L344
             // TODO(Hernan): do we need to make sure this doesn't bite us in the ass?
