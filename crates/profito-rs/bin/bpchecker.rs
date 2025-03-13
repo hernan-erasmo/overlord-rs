@@ -1334,23 +1334,40 @@ async fn main() {
 
     println!("\n### Most profitable liquidation opportunity ###");
     if let Some(best) = best_pair {
+        let debt_symbol = reserves_configuration.get(&best.debt_asset).unwrap().symbol.clone();
+        let collateral_symbol = reserves_configuration.get(&best.collateral_asset).unwrap().symbol.clone();
+
         println!("\tliquidationCall(");
         println!(
             "\t\tcollateralAsset = {}, # {}",
             best.collateral_asset,
-            reserves_configuration
-                .get(&best.collateral_asset)
-                .unwrap()
-                .symbol
+            collateral_symbol
         );
         println!(
             "\t\tdebtAsset = {}, # {}",
             best.debt_asset,
-            reserves_configuration.get(&best.debt_asset).unwrap().symbol
+            debt_symbol,
         );
         println!("\t\tuser = {},", user_address);
         println!("\t\tdebtToCover = {},", best.actual_debt_to_liquidate);
         println!("\t\treceiveAToken = false,");
         println!("\t)");
+
+        println!("\n### Foxdie ***TEST*** inputs ###");
+        println!("\n");
+        println!("export DEBT_SYMBOL={} && \\", debt_symbol);
+        println!("export {}={} && \\", debt_symbol, best.debt_asset);
+        println!("export COLLATERAL_SYMBOL={} && \\", collateral_symbol);
+        println!("export {}={} && \\", collateral_symbol, best.collateral_asset);
+        println!("export USER_TO_LIQUIDATE={} && \\", user_address);
+        println!("export DEBT_AMOUNT={} && \\", best.actual_debt_to_liquidate);
+        println!("export PRICE_UPDATER={} && \\", "0x413e725094c7810669F91856cc58e73eA3fbc400"); // TODO
+        println!("export PRICE_UPDATE_TX_HASH={} && \\", "0xbec7f88d402c253a12f7c569494cc3b33e278bb49be40a8d9330c46ad396a4d4"); // TODO
+        println!("export PRICE_UPDATE_BLOCK={} && \\", block_number - 1); // One less because forge will also replay the price update tx
+        println!("export COLLATERAL_TO_WETH_FEE={} && \\", "10000"); // TODO
+        println!("export WETH_TO_DEBT_FEE={} && \\", "10000"); // TODO
+        println!("export BUILDER_BRIBE={} && \\", "1500"); // TODO
+        println!("forge test --match-test testLiquidation -vvvvv");
+        println!("\n");
     }
 }
