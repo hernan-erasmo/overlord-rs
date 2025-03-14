@@ -1361,8 +1361,8 @@ async fn main() {
         println!("export {}={} && \\", collateral_symbol, best.collateral_asset);
         println!("export USER_TO_LIQUIDATE={} && \\", user_address);
         println!("export DEBT_AMOUNT={} && \\", best.actual_debt_to_liquidate);
-        println!("export PRICE_UPDATER={} && \\", "0x413e725094c7810669F91856cc58e73eA3fbc400"); // TODO
-        println!("export PRICE_UPDATE_TX_HASH={} && \\", "0xbec7f88d402c253a12f7c569494cc3b33e278bb49be40a8d9330c46ad396a4d4"); // TODO
+        println!("export PRICE_UPDATER={} && \\", std::env::var("PRICE_UPDATE_FROM").unwrap_or_else(|_| "Couldn't read PRICE_UPDATE_FROM from env".to_string()));
+        println!("export PRICE_UPDATE_TX_HASH={} && \\", std::env::var("PRICE_UPDATE_TX").unwrap_or_else(|_| "Couldn't read PRICE_UPDATE_TX from env".to_string()));
         println!("export PRICE_UPDATE_BLOCK={} && \\", block_number - 1); // One less because forge will also replay the price update tx
         println!("export COLLATERAL_TO_WETH_FEE={} && \\", "10000"); // TODO
         println!("export WETH_TO_DEBT_FEE={} && \\", "10000"); // TODO

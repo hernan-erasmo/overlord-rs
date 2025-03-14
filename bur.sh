@@ -128,6 +128,6 @@ if [ -n "$TX_HASH" ]; then
 fi
 
 echo "Running bpchecker with user_address: $USER_ADDRESS, ipc_file: $ANVIL_IPC"
-./target/release/bpchecker "$USER_ADDRESS" "$ANVIL_IPC"
+export PRICE_UPDATE_FROM=$PRICE_UPDATE_FROM && export PRICE_UPDATE_TX=$PRICE_UPDATE_TX && ./target/release/bpchecker "$USER_ADDRESS" "$ANVIL_IPC"
 
 echo "Done!"
