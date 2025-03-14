@@ -12,3 +12,4 @@ pub const UNISWAP_V3_QUOTER: Address = address!("b27308f9F90D607463bb33eA1BeBb41
 
 // used on bpchecker
 pub const AAVE_V3_POOL_ADDRESS: Address = address!("87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2");
+pub const WETH: Address = address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
