@@ -1,8 +1,5 @@
 use alloy::{
-    primitives::{address, utils::format_units, Address, U256},
-    providers::{IpcConnect, Provider, ProviderBuilder, RootProvider},
-    pubsub::PubSubFrontend,
-    sol_types::sol,
+    primitives::{address, utils::format_units, Address, U256}, providers::{IpcConnect, Provider, ProviderBuilder, RootProvider}, pubsub::PubSubFrontend, sol_types::sol
 };
 use profito_rs::{
     calculations::{get_best_fee_tier_for_swap, percent_div, percent_mul},
@@ -1061,6 +1058,21 @@ async fn calculate_available_collateral_to_liquidate(
     )
 }
 
+/// UniswapV3 fees are hundredths of basis points: 1% == 10000; 0,3% == 3000; 0,05% == 500; 0,01% == 100
+/// Calculate and return the lowest fee tier for which there's enough liquidity
+async fn calculate_best_swap_fees(
+    provider: RootProvider<PubSubFrontend>,
+    collateral_asset: Address,
+    collateral_amount: U256,
+    debt_asset: Address,
+    debt_amount: U256,
+) -> (U256, U256) {
+    // collateral to weth, weth to debt
+    let mut best_fees = (U256::from(10000), U256::from(10000));
+
+    best_fees
+}
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = env::args().collect();
@@ -1353,8 +1365,15 @@ async fn main() {
         println!("\t\treceiveAToken = false,");
         println!("\t)");
 
+        let (collateral_to_weth_fee, weth_to_debt_fee) = calculate_best_swap_fees(
+            provider.clone(),
+            best.collateral_asset,
+            best.actual_collateral_to_liquidate,
+            best.debt_asset,
+            best.actual_debt_to_liquidate,
+        ).await;
+
         println!("\n### Foxdie ***TEST*** inputs ###");
-        println!("\n");
         println!("export DEBT_SYMBOL={} && \\", debt_symbol);
         println!("export {}={} && \\", debt_symbol, best.debt_asset);
         println!("export COLLATERAL_SYMBOL={} && \\", collateral_symbol);
