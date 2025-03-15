@@ -1095,9 +1095,7 @@ async fn get_uniswap_v3_pools(
 async fn calculate_best_swap_fees(
     provider: RootProvider<PubSubFrontend>,
     collateral_asset: Address,
-    collateral_amount: U256,
     debt_asset: Address,
-    debt_amount: U256,
 ) -> (U24, U24) {
     // collateral to weth, weth to debt
     let mut best_fees = (U24::from(10000), U24::from(10000));
@@ -1422,9 +1420,7 @@ async fn main() {
         let (collateral_to_weth_fee, weth_to_debt_fee) = calculate_best_swap_fees(
             provider.clone(),
             best.collateral_asset,
-            best.actual_collateral_to_liquidate,
             best.debt_asset,
-            best.actual_debt_to_liquidate,
         ).await;
 
         println!("\n### Foxdie ***TEST*** inputs ###");
