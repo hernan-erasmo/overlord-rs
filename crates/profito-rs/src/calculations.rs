@@ -57,7 +57,7 @@ pub async fn get_best_fee_tier_for_swap(
     let mut best_output = U256::MAX;
     let mut best_fee = U24::from(100);
     let mut best_contract = Address::ZERO;
-    let available_fees = vec![
+    let available_fees = [
         U24::from(100),   // 0.01%
         U24::from(500),   // 0.05%
         U24::from(3000),  // 0.3%
@@ -125,7 +125,7 @@ pub async fn get_best_fee_tier_for_swap(
                 );
                 quote.amountIn
             }
-            Err(e) => {
+            _ => {
                 continue;
             }
         };
