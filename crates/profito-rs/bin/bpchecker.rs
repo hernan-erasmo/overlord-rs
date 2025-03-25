@@ -1,5 +1,5 @@
 use alloy::{
-    primitives::{address, utils::format_units, Address, U256},
+    primitives::{address, aliases::U24, utils::format_units, Address, U256},
     providers::{IpcConnect, Provider, ProviderBuilder, RootProvider},
     pubsub::PubSubFrontend,
     sol_types::sol,
@@ -8,13 +8,13 @@ use profito_rs::{
     calculations::{get_best_fee_tier_for_swap, percent_div, percent_mul},
     constants::{
         AAVE_ORACLE_ADDRESS, AAVE_V3_POOL_ADDRESS, AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS,
-        AAVE_V3_PROVIDER_ADDRESS, AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS,
+        AAVE_V3_PROVIDER_ADDRESS, AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, UNISWAP_V3_FACTORY, WETH,
     },
     sol_bindings::{
         pool::AaveV3Pool,
         AaveOracle, AaveProtocolDataProvider, AaveUIPoolDataProvider, IAToken,
         IUiPoolDataProviderV3::{AggregatedReserveData, UserReserveData},
-        ERC20,
+        UniswapV3Factory, UniswapV3Pool, ERC20,
     },
     utils::{ReserveConfigurationData, ReserveConfigurationEnhancedData},
 };
@@ -1061,6 +1061,90 @@ async fn calculate_available_collateral_to_liquidate(
     )
 }
 
+/// Returns pools, fees and liquidity sorted by liquidity descending
+async fn get_uniswap_v3_pools(
+    provider: &RootProvider<PubSubFrontend>,
+    token_a: Address,
+    token_b: Address,
+) -> Vec<(Address, U24, u128)> {
+    let factory = UniswapV3Factory::new(UNISWAP_V3_FACTORY, provider.clone());
+    let fee_tiers = [
+        U24::from(100),
+        U24::from(500),
+        U24::from(3000),
+        U24::from(10000),
+    ]; // 0.01%, 0.05%, 0.3%, 1%
+    let mut pools = Vec::new();
+
+    for &fee in &fee_tiers {
+        let pool_address = match factory.getPool(token_a, token_b, fee).call().await {
+            Ok(response) => response._0,
+            Err(e) => {
+                println!("Error fetching pool: {}", e);
+                Address::ZERO
+            }
+        };
+        let pool = UniswapV3Pool::new(pool_address, provider.clone());
+        let in_range_liquidity = match pool.liquidity().call().await {
+            Ok(response) => response._0,
+            Err(e) => {
+                println!("Error fetching pool liquidity: {}", e);
+                0
+            }
+        };
+        if pool_address != Address::ZERO {
+            pools.push((pool_address, fee, in_range_liquidity));
+        }
+    }
+
+    pools.sort_by(|a, b| b.2.cmp(&a.2));
+    pools
+}
+
+/// UniswapV3 fees are hundredths of basis points: 1% == 10000; 0,3% == 3000; 0,05% == 500; 0,01% == 100
+/// Calculate and return the lowest fee tier for which there's enough liquidity
+async fn calculate_best_swap_fees(
+    provider: RootProvider<PubSubFrontend>,
+    collateral_asset: Address,
+    debt_asset: Address,
+) -> (U24, U24) {
+    // collateral to weth, weth to debt
+    let mut best_fees = (U24::from(10000), U24::from(10000));
+
+    // Get collateral -> WETH pools
+    if collateral_asset != WETH {
+        let collateral_pools = get_uniswap_v3_pools(&provider, collateral_asset, WETH).await;
+        println!(
+            "\t\tFound {} collateral/WETH pools:",
+            collateral_pools.len()
+        );
+        for (addr, fee, in_range_liquidity) in &collateral_pools {
+            println!(
+                "\t\t- Liquidity {} with {}hbps fee at pool {}",
+                in_range_liquidity, fee, addr
+            );
+        }
+        best_fees.0 = collateral_pools[0].1;
+    } else {
+        println!("\t\tCollateral is WETH, no need to swap this leg");
+    }
+
+    // Get WETH -> debt pools
+    let debt_pools = get_uniswap_v3_pools(&provider, WETH, debt_asset).await;
+    println!("\t\tFound {} WETH/debt pools:", debt_pools.len());
+    for (addr, fee, in_range_liquidity) in &debt_pools {
+        println!(
+            "\t\t- Liquidity {} with {}hbps fee at pool {}",
+            in_range_liquidity, fee, addr
+        );
+    }
+    best_fees.1 = debt_pools[0].1;
+
+    // TODO: Calculate best fees based on liquidity and price impact
+
+    best_fees
+}
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = env::args().collect();
@@ -1334,39 +1418,62 @@ async fn main() {
 
     println!("\n### Most profitable liquidation opportunity ###");
     if let Some(best) = best_pair {
-        let debt_symbol = reserves_configuration.get(&best.debt_asset).unwrap().symbol.clone();
-        let collateral_symbol = reserves_configuration.get(&best.collateral_asset).unwrap().symbol.clone();
+        let debt_symbol = reserves_configuration
+            .get(&best.debt_asset)
+            .unwrap()
+            .symbol
+            .clone();
+        let collateral_symbol = reserves_configuration
+            .get(&best.collateral_asset)
+            .unwrap()
+            .symbol
+            .clone();
 
         println!("\tliquidationCall(");
         println!(
             "\t\tcollateralAsset = {}, # {}",
-            best.collateral_asset,
-            collateral_symbol
+            best.collateral_asset, collateral_symbol
         );
-        println!(
-            "\t\tdebtAsset = {}, # {}",
-            best.debt_asset,
-            debt_symbol,
-        );
+        println!("\t\tdebtAsset = {}, # {}", best.debt_asset, debt_symbol,);
         println!("\t\tuser = {},", user_address);
         println!("\t\tdebtToCover = {},", best.actual_debt_to_liquidate);
         println!("\t\treceiveAToken = false,");
         println!("\t)");
 
+        let (collateral_to_weth_fee, weth_to_debt_fee) =
+            calculate_best_swap_fees(provider.clone(), best.collateral_asset, best.debt_asset)
+                .await;
+
         println!("\n### Foxdie ***TEST*** inputs ###");
-        println!("\n");
         println!("export DEBT_SYMBOL={} && \\", debt_symbol);
         println!("export {}={} && \\", debt_symbol, best.debt_asset);
         println!("export COLLATERAL_SYMBOL={} && \\", collateral_symbol);
-        println!("export {}={} && \\", collateral_symbol, best.collateral_asset);
+        println!(
+            "export {}={} && \\",
+            collateral_symbol, best.collateral_asset
+        );
         println!("export USER_TO_LIQUIDATE={} && \\", user_address);
         println!("export DEBT_AMOUNT={} && \\", best.actual_debt_to_liquidate);
-        println!("export PRICE_UPDATER={} && \\", std::env::var("PRICE_UPDATE_FROM").unwrap_or_else(|_| "Couldn't read PRICE_UPDATE_FROM from env".to_string()));
-        println!("export PRICE_UPDATE_TX_HASH={} && \\", std::env::var("PRICE_UPDATE_TX").unwrap_or_else(|_| "Couldn't read PRICE_UPDATE_TX from env".to_string()));
+        println!(
+            "export PRICE_UPDATER={} && \\",
+            std::env::var("PRICE_UPDATE_FROM")
+                .unwrap_or_else(|_| "Couldn't read PRICE_UPDATE_FROM from env".to_string())
+        );
+        println!(
+            "export PRICE_UPDATE_TX_HASH={} && \\",
+            std::env::var("PRICE_UPDATE_TX")
+                .unwrap_or_else(|_| "Couldn't read PRICE_UPDATE_TX from env".to_string())
+        );
         println!("export PRICE_UPDATE_BLOCK={} && \\", block_number - 1); // One less because forge will also replay the price update tx
-        println!("export COLLATERAL_TO_WETH_FEE={} && \\", "10000"); // TODO
-        println!("export WETH_TO_DEBT_FEE={} && \\", "10000"); // TODO
-        println!("export BUILDER_BRIBE={} && \\", "1500"); // TODO
+        println!(
+            "export COLLATERAL_TO_WETH_FEE={} && \\",
+            collateral_to_weth_fee.to_string()
+        );
+        println!(
+            "export WETH_TO_DEBT_FEE={} && \\",
+            weth_to_debt_fee.to_string()
+        );
+        println!("export BUILDER_BRIBE={} && \\", "0"); // TODO
         println!("forge test --match-test testLiquidation -vvvvv");
         println!("\n");
     }
