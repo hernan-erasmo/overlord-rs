@@ -1,9 +1,11 @@
-use super::cache::ProviderCache;
 use super::constants::*;
 use super::sol_bindings::{
-    AaveProtocolDataProvider, AaveUIPoolDataProvider, GetReserveConfigurationDataReturn,
+    AaveProtocolDataProvider, AaveUIPoolDataProvider, GetReserveConfigurationDataReturn, IERC20Metadata,
 };
 use alloy::primitives::{address, Address, U256};
+use alloy::providers::RootProvider;
+
+use alloy::pubsub::PubSubFrontend;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -16,8 +18,18 @@ pub struct ReserveConfigurationEnhancedData {
 
 pub type ReserveConfigurationData = HashMap<Address, ReserveConfigurationEnhancedData>;
 
+async fn get_token_symbol(provider: RootProvider<PubSubFrontend>, token_address: Address) -> String {
+    let token = IERC20Metadata::new(token_address, provider.clone());
+    match token.symbol().call().await {
+        Ok(symbol) => symbol._0,
+        Err(_) => {
+            "UNK_OR_UNDEF_SYMBOL".to_string()
+        }
+    }
+}
+
 pub async fn generate_reserve_details_by_asset(
-    provider_cache: Arc<ProviderCache>,
+    provider: Arc<RootProvider<PubSubFrontend>>,
 ) -> Result<ReserveConfigurationData, Box<dyn std::error::Error>> {
     let mut symbols_by_address = HashMap::new();
     symbols_by_address.insert(
@@ -174,91 +186,73 @@ pub async fn generate_reserve_details_by_asset(
     );
 
     let reserves: Vec<Address>;
-    match provider_cache.get_provider().await {
-        Ok(provider) => {
-            let ui_data = AaveUIPoolDataProvider::new(
-                AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS,
-                provider.clone(),
-            );
-            match ui_data
-                .getReservesList(AAVE_V3_PROVIDER_ADDRESS)
-                .call()
-                .await
-            {
-                Ok(all_reserves) => {
-                    reserves = all_reserves._0;
-                }
-                Err(e) => {
-                    return Err(format!("Failed to get reserves list to initialize reserve configuration struct: {}", e).into());
-                }
-            }
+    let ui_data = AaveUIPoolDataProvider::new(
+        AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS,
+        provider.clone(),
+    );
+    match ui_data
+        .getReservesList(AAVE_V3_PROVIDER_ADDRESS)
+        .call()
+        .await
+    {
+        Ok(all_reserves) => {
+            reserves = all_reserves._0;
         }
         Err(e) => {
-            return Err(format!("Failed to get the provider to query reserves list: {}", e).into())
+            return Err(format!("Failed to get reserves list to initialize reserve configuration struct: {}", e).into());
         }
     }
 
     let mut configuration_data: ReserveConfigurationData = HashMap::new();
-    match provider_cache.get_provider().await {
-        Ok(provider) => {
-            let aave_config = AaveProtocolDataProvider::new(
-                AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS,
-                provider.clone(),
-            );
-            let unknown_asset = String::from("unknown_asset");
-            for reserve_address in reserves {
-                let symbol = symbols_by_address
-                    .get(&reserve_address)
-                    .unwrap_or(&unknown_asset);
-                let data: GetReserveConfigurationDataReturn;
-                let liquidation_fee: U256;
-                match aave_config
-                    .getReserveConfigurationData(reserve_address)
-                    .call()
-                    .await
-                {
-                    Ok(reserve_config) => data = reserve_config,
-                    Err(e) => {
-                        return Err(format!(
-                            "Failed to get reserve configuration data for asset {}: {}",
-                            reserve_address, e
-                        )
-                        .into())
-                    }
-                }
-                match aave_config
-                    .getLiquidationProtocolFee(reserve_address)
-                    .call()
-                    .await
-                {
-                    Ok(fee_response) => {
-                        liquidation_fee = fee_response._0;
-                    }
-                    Err(e) => {
-                        return Err(format!(
-                            "Failed to get reserve liquidation fee for asset {}: {}",
-                            reserve_address, e
-                        )
-                        .into())
-                    }
-                }
-                configuration_data.insert(
-                    reserve_address,
-                    ReserveConfigurationEnhancedData {
-                        symbol: symbol.clone(),
-                        data,
-                        liquidation_fee,
-                    },
-                );
+    let aave_config = AaveProtocolDataProvider::new(
+        AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS,
+        provider.clone(),
+    );
+    let unknown_asset = String::from("unknown_asset");
+    for reserve_address in reserves {
+        let symbol = symbols_by_address
+            .get(&reserve_address)
+            .unwrap_or(&unknown_asset);
+        let data: GetReserveConfigurationDataReturn;
+        let liquidation_fee: U256;
+        match aave_config
+            .getReserveConfigurationData(reserve_address)
+            .call()
+            .await
+        {
+            Ok(reserve_config) => data = reserve_config,
+            Err(e) => {
+                return Err(format!(
+                    "Failed to get reserve configuration data for asset {}: {}",
+                    reserve_address, e
+                )
+                .into())
             }
         }
-        Err(e) => {
-            return Err(format!(
-                "Failed to get provider to query reserve configuration: {}",
-                e
-            )
-            .into())
+        match aave_config
+            .getLiquidationProtocolFee(reserve_address)
+            .call()
+            .await
+        {
+            Ok(fee_response) => {
+                liquidation_fee = fee_response._0;
+            }
+            Err(e) => {
+                return Err(format!(
+                    "Failed to get reserve liquidation fee for asset {}: {}",
+                    reserve_address, e
+                )
+                .into())
+            }
         }
+        configuration_data.insert(
+            reserve_address,
+            ReserveConfigurationEnhancedData {
+                symbol: symbol.clone(),
+                data,
+                liquidation_fee,
+            },
+        );
     }
     Ok(configuration_data)
 }

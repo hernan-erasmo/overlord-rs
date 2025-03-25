@@ -103,6 +103,7 @@ async fn main() {
     _setup_logging();
     info!("Starting Profito RS");
     let provider_cache = Arc::new(ProviderCache::new());
+    let price_cache = Arc::new(Mutex::new(PriceCache::new(3)));
     let context = zmq::Context::new();
     let socket = context.socket(zmq::PULL).unwrap();
     if let Err(e) = socket.bind(PROFITO_INBOUND_ENDPOINT) {
@@ -113,13 +114,12 @@ async fn main() {
         "Listening for health factor alerts on {}",
         PROFITO_INBOUND_ENDPOINT
     );
-    let reserves_configuration = generate_reserve_details_by_asset(provider_cache.clone())
+    let reserves_configuration = generate_reserve_details_by_asset(provider_cache.get_provider().await.unwrap())
         .await
         .unwrap_or_else(|e| {
             error!("Failed to initialize reserve configuration: {}", e);
             std::process::exit(1);
         });
-    let price_cache = Arc::new(Mutex::new(PriceCache::new(3)));
     loop {
         match socket.recv_bytes(0) {
             Ok(bytes) => match bincode::deserialize::<UnderwaterUserEvent>(&bytes) {
