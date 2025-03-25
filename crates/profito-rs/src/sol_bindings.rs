@@ -12,6 +12,15 @@ sol!(
     #[allow(missing_docs)]
     #[allow(clippy::too_many_arguments)]
     #[sol(rpc)]
+    interface IERC20Metadata {
+        function symbol() external view returns (string);
+    }
+);
+
+sol!(
+    #[allow(missing_docs)]
+    #[allow(clippy::too_many_arguments)]
+    #[sol(rpc)]
     IAToken,
     "src/abis/iatoken.json"
 );
