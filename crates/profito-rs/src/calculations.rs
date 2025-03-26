@@ -144,6 +144,49 @@ pub async fn get_best_fee_tier_for_swap(
     }
 }
 
+pub fn calculate_actual_debt_to_liquidate(
+    user_reserve_debt: U256,
+    user_reserve_collateral_in_base_currency: U256,
+    user_reserve_debt_in_base_currency: U256,
+    health_factor_v33: U256,
+    total_debt_in_base_currency: U256,
+    debt_asset_unit: U256,
+    debt_asset_price: U256,
+) -> U256 {
+    let MIN_BASE_MAX_CLOSE_FACTOR_THRESHOLD = U256::from(2000e8);
+    let CLOSE_FACTOR_HF_THRESHOLD = U256::from(0.95e18);
+    let DEFAULT_LIQUIDATION_CLOSE_FACTOR = U256::from(0.5e4);
+
+    // by default whole debt in the reserve could be liquidated
+    let mut max_liquidatable_debt = user_reserve_debt;
+
+    // but if debt and collateral are above or equal MIN_BASE_MAX_CLOSE_FACTOR_THRESHOLD
+    // and health factor is above CLOSE_FACTOR_HF_THRESHOLD this amount may be adjusted
+    if user_reserve_collateral_in_base_currency >= MIN_BASE_MAX_CLOSE_FACTOR_THRESHOLD
+        && user_reserve_debt_in_base_currency >= MIN_BASE_MAX_CLOSE_FACTOR_THRESHOLD
+        && health_factor_v33 >= CLOSE_FACTOR_HF_THRESHOLD
+    {
+        let total_default_liquidatable_debt_in_base_currency = percent_mul(
+            total_debt_in_base_currency,
+            DEFAULT_LIQUIDATION_CLOSE_FACTOR,
+        );
+
+        // if the debt is more than the DEFAULT_LIQUIDATION_CLOSE_FACTOR % of the whole,
+        // then we CAN liquidate only up to DEFAULT_LIQUIDATION_CLOSE_FACTOR %
+        if user_reserve_debt_in_base_currency > total_default_liquidatable_debt_in_base_currency {
+            max_liquidatable_debt = (total_default_liquidatable_debt_in_base_currency
+                * debt_asset_unit)
+                / debt_asset_price;
+            println!("\t\tv3.3 partial max liquidatable debt (total_d * debt_unit) / debt_price = {} * {} / {} = {}", total_default_liquidatable_debt_in_base_currency, debt_asset_unit, debt_asset_price, max_liquidatable_debt);
+        }
+    }
+
+    // in solidity, there's a check that verifies if what the user send as debtToCover on the liquidationCall
+    // is higher than this and, if it is, then it uses this value instead. We don't care about that because we'll
+    // always want to liquidate as much as possible.
+    max_liquidatable_debt
+}
+
 pub async fn get_best_debt_collateral_pair(
     candidate: Address,
     reserves_configuration: ReserveConfigurationData,
