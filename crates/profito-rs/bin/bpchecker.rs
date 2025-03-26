@@ -924,12 +924,12 @@ async fn get_best_liquidation_opportunity(
     for borrowed_reserve in assets_borrowed
         .clone()
         .iter()
-        .filter(|r| r.scaledVariableDebt > U256::from(0))
+        .filter(|r| r.scaledVariableDebt > U256::ZERO)
     {
         for supplied_reserve in assets_supplied
             .clone()
             .iter()
-            .filter(|r| r.scaledATokenBalance > U256::from(0) && r.usageAsCollateralEnabledOnUser)
+            .filter(|r| r.scaledATokenBalance > U256::ZERO && r.usageAsCollateralEnabledOnUser)
         {
             // 2/5) WETH (debt) -> WBTC (collateral):
             print_debt_collateral_title(
