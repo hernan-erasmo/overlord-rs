@@ -320,7 +320,7 @@ async fn calculate_pair_profitability(
     let gas_used_estimation = U256::from(1000000); // TODO(Hernan): good-enough this
     let gas_price_in_gwei = match provider.get_gas_price().await {
         Ok(price) => U256::from(price) / U256::from(1e3),
-        Err(e) => U256::MAX,
+        _ => U256::MAX,
     };
     let execution_gas_cost = (gas_used_estimation * gas_price_in_gwei) / U256::from(1000000);
     let swap_loss_factor = U256::from(10000); // this assumes we will swap in 1% fee pools (could be more sophisticated)
@@ -777,7 +777,7 @@ async fn calculate_available_collateral_to_liquidate(
         collateral_amount = user_collateral_balance;
         debt_amount_needed = (collateral_asset_price * collateral_amount * debt_asset_unit)
             / percent_div(
-                (debt_asset_price * collateral_asset_unit),
+                debt_asset_price * collateral_asset_unit,
                 liquidation_bonus,
             )
     } else {
@@ -814,7 +814,7 @@ async fn calculate_available_collateral_to_liquidate(
     let gas_used_estimation = U256::from(1000000);
     let gas_price_in_gwei = match provider.get_gas_price().await {
         Ok(price) => U256::from(price) / U256::from(1e3),
-        Err(e) => U256::MAX,
+        _ => U256::MAX,
     };
     let execution_gas_cost = (gas_used_estimation * gas_price_in_gwei) / U256::from(1000000);
     // this assumes we will swap in 1% fee pools (could be more sophisticated)
@@ -950,7 +950,7 @@ async fn main() {
 
     // Setup provider
     let ipc = IpcConnect::new(ipc_path.to_string());
-    let provider = ProviderBuilder::new().on_ipc(ipc).await?;
+    let provider = ProviderBuilder::new().on_ipc(ipc).await.unwrap();
     let provider = Arc::new(provider);
 
     let block_number = provider.get_block_number().await.unwrap_or_default();
@@ -965,7 +965,7 @@ async fn main() {
 
     // Create reserve configuration struct
     let reserves_configuration =
-        generate_reserve_details_by_asset(provider.clone()).await;
+        generate_reserve_details_by_asset(provider.clone()).await.unwrap();
     let assets_borrowed = user_reserves_data
         .iter()
         .filter(|reserve| reserve.scaledVariableDebt > U256::ZERO)
