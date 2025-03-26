@@ -50,14 +50,6 @@ async fn process_uw_event(
         return Err("User reserves data came back empty".into());
     };
 
-    if !price_cache
-        .lock()
-        .await
-        .override_price(uw_event.trace_id.clone(), uw_event.new_asset_prices)
-        .await
-    {
-        warn!("Price(s) for uw_event with trace_id {} couldn't be overriden. Next calculations won't consider the pending price update TX values.", uw_event.trace_id);
-    }
     let aave_oracle: AaveOracle::AaveOracleInstance<
         PubSubFrontend,
         Arc<RootProvider<PubSubFrontend>>,
@@ -118,6 +110,16 @@ async fn main() {
                 Ok(uw_event) => {
                     let reserves_configuration = reserves_configuration.clone();
                     let provider_cache = provider_cache.clone();
+                    let cloned_uw_event = uw_event.clone();
+
+                    // Price cache needs to contain the new prices before processing the event
+                    if !price_cache
+                        .lock()
+                        .await
+                        .override_price(cloned_uw_event.trace_id.clone(), cloned_uw_event.new_asset_prices)
+                        .await {
+                            warn!("Price(s) for uw_event with trace_id {} couldn't be overriden. Next calculations won't consider the pending price update TX values.", uw_event.trace_id);
+                        }
                     let price_cache = price_cache.clone();
                     tokio::spawn(async move {
                         if let Err(e) = process_uw_event(
