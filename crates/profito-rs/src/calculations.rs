@@ -9,8 +9,8 @@ use std::sync::Arc;
 use super::{
     cache::PriceCache,
     sol_bindings::{
-        AaveOracle, IUiPoolDataProviderV3::UserReserveData, UniswapV3Factory, UniswapV3Pool,
-        UniswapV3Quoter,
+        AaveOracle, IUiPoolDataProviderV3::{AggregatedReserveData, UserReserveData}, UniswapV3Factory, UniswapV3Pool,
+        UniswapV3Quoter, IAToken, ERC20
     },
     utils::ReserveConfigurationData,
 };
@@ -185,6 +185,41 @@ pub fn calculate_actual_debt_to_liquidate(
     // is higher than this and, if it is, then it uses this value instead. We don't care about that because we'll
     // always want to liquidate as much as possible.
     max_liquidatable_debt
+}
+
+pub async fn calculate_user_balances(
+    reserves_data: Vec<AggregatedReserveData>,
+    supplied_reserve: &UserReserveData,
+    borrowed_reserve: &UserReserveData,
+    provider: Arc<RootProvider<PubSubFrontend>>,
+    user_address: Address,
+) -> Result<(AggregatedReserveData, U256, AggregatedReserveData, U256), Box<dyn std::error::Error>> {
+    let collateral_reserve = reserves_data
+        .iter()
+        .find(|agg_reserve_data| {
+            agg_reserve_data.underlyingAsset == supplied_reserve.underlyingAsset
+        })
+        .unwrap();
+    let collateral_a_token =
+        IAToken::new(collateral_reserve.aTokenAddress, provider.clone());
+    let user_collateral_balance =
+        match collateral_a_token.balanceOf(user_address).call().await {
+            Ok(response) => response._0,
+            Err(e) => return Err(format!("Error trying to call collateralAToken.balanceOf(): {}", e).into())
+        };
+    let debt_reserve = reserves_data
+        .iter()
+        .find(|agg_reserve_data| {
+            agg_reserve_data.underlyingAsset == borrowed_reserve.underlyingAsset
+        })
+        .unwrap();
+    let debt_reserve_token =
+        ERC20::new(debt_reserve.variableDebtTokenAddress, provider.clone());
+    let user_reserve_debt = match debt_reserve_token.balanceOf(user_address).call().await {
+        Ok(response) => response.balance,
+        Err(e) => return Err(format!("Error trying to call debt_reserve_token.balanceOf: {}", e).into())
+    };
+    Ok((collateral_reserve.clone(), user_collateral_balance, debt_reserve.clone(), user_reserve_debt))
 }
 
 /// Not the same as the one from bpchecker

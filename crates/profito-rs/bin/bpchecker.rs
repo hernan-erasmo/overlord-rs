@@ -4,7 +4,7 @@ use alloy::{
     pubsub::PubSubFrontend,
 };
 use profito_rs::{
-    calculations::{percent_div, percent_mul, calculate_actual_debt_to_liquidate},
+    calculations::{percent_div, percent_mul, calculate_actual_debt_to_liquidate, calculate_user_balances},
     constants::{
         AAVE_ORACLE_ADDRESS, AAVE_V3_POOL_ADDRESS, AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS,
         AAVE_V3_PROVIDER_ADDRESS, AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, UNISWAP_V3_FACTORY, WETH,
@@ -901,35 +901,22 @@ async fn get_best_liquidation_opportunity(
             );
 
             // begin section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L234-L238
-            let collateral_reserve = reserves_data
-                .iter()
-                .find(|agg_reserve_data| {
-                    agg_reserve_data.underlyingAsset == supplied_reserve.underlyingAsset
-                })
-                .unwrap();
-            let collateral_a_token =
-                IAToken::new(collateral_reserve.aTokenAddress, provider.clone());
-            let user_collateral_balance =
-                match collateral_a_token.balanceOf(user_address).call().await {
-                    Ok(response) => response._0,
-                    Err(e) => {
-                        eprintln!("Error trying to call collateralAToken.balanceOf(): {}", e);
-                        U256::ZERO
-                    }
-                };
-            let debt_reserve = reserves_data
-                .iter()
-                .find(|agg_reserve_data| {
-                    agg_reserve_data.underlyingAsset == borrowed_reserve.underlyingAsset
-                })
-                .unwrap();
-            let debt_reserve_token =
-                ERC20::new(debt_reserve.variableDebtTokenAddress, provider.clone());
-            let user_reserve_debt = match debt_reserve_token.balanceOf(user_address).call().await {
-                Ok(response) => response.balance,
+            let (
+                collateral_reserve,
+                user_collateral_balance,
+                debt_reserve,
+                user_reserve_debt
+            ) = match calculate_user_balances(
+                reserves_data.clone(),
+                supplied_reserve,
+                borrowed_reserve,
+                provider.clone(),
+                user_address,
+            ).await {
+                Ok(result) => result,
                 Err(e) => {
-                    eprintln!("Error trying to call debt_reserve_token.balanceOf: {}", e);
-                    U256::ZERO
+                    eprintln!("Error calculating user balances: {}", e);
+                    continue;
                 }
             };
             // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L234-L238
