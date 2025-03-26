@@ -36,12 +36,14 @@ impl PriceCache {
         trace_id: String,
         new_prices_by_asset: Vec<(Address, String, U256)>,
     ) -> bool {
+
+        // This should only happen on initial vega-rs runs. No prices to update.
         if new_prices_by_asset.is_empty() {
-            // This means initial-run from vega-rs. No prices to update.
             return true;
         }
 
-        // Chech if we've already processed this trace_id
+        // If this trace_id is already present in the cache, it means a previous item in the
+        // opportunity processing loop already created it. No more setup needs to be done.
         if self.overriden_traces.contains(&trace_id) {
             return true;
         }
