@@ -8,7 +8,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     sync::Arc,
 };
-use tracing::{info, warn};
+use tracing::{info, warn, error};
 
 #[derive(Debug, Clone)]
 pub struct PriceCache {
@@ -36,46 +36,30 @@ impl PriceCache {
         trace_id: String,
         new_prices_by_asset: Vec<(Address, String, U256)>,
     ) -> bool {
-
         // This should only happen on initial vega-rs runs. No prices to update.
         if new_prices_by_asset.is_empty() {
             return true;
         }
 
-        // If this trace_id is already present in the cache, it means a previous item in the
-        // opportunity processing loop already created it. No more setup needs to be done.
+        // Now that override_price is called _before_ processing candidates, it should never
+        // happen that we already have a trace present in the cache.
+        // I don't want to kill the program in this case, so I'm returning true as if nothing
+        // happened. But I'm logging an error nonetheless because this would be a most curious
+        // occurrence.
         if self.overriden_traces.contains(&trace_id) {
+            error!("trace_id {} was present in the price cache", trace_id);
             return true;
         }
 
-        if !self.prices.contains_key(&trace_id) {
-            warn!("No trace_id {} for price override", trace_id);
-            return false;
-        }
+        // Get or create the prices HashMap for this trace_id
+        let prices = self.prices.entry(trace_id.clone()).or_insert_with(|| HashMap::new());
 
         for (reserve, symbol, new_price) in new_prices_by_asset.iter() {
-            let old_price = match self.prices.get(&trace_id).and_then(|p| p.get(reserve)) {
-                Some(&price) => price,
-                None => {
-                    warn!(
-                        "Failed to get old price for asset {} in trace {}",
-                        reserve, trace_id
-                    );
-                    U256::ZERO
-                }
-            };
-            if let Some(prices) = self.prices.get_mut(&trace_id) {
-                prices.insert(*reserve, *new_price);
-                let old_price_str = if old_price == U256::ZERO {
-                    "INVALID".to_string()
-                } else {
-                    old_price.to_string()
-                };
-                info!(
-                    "Successfully override {} price cache for {}. (old ={}, current={})",
-                    trace_id, symbol, old_price_str, new_price,
-                );
-            }
+            prices.insert(*reserve, *new_price);
+            info!(
+                "Successfully override {} price cache for {} (new value = {})",
+                trace_id, symbol, new_price,
+            );
         }
 
         // Mark the trace as overriden
