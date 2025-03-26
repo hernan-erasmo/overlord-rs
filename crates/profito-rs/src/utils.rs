@@ -2,7 +2,7 @@ use crate::sol_bindings::pool::AaveV3Pool;
 
 use super::constants::*;
 use super::sol_bindings::{
-    AaveProtocolDataProvider, GetReserveConfigurationDataReturn, IERC20Metadata,
+    AaveProtocolDataProvider, GetReserveConfigurationDataReturn, IERC20Metadata, AaveUIPoolDataProvider, IUiPoolDataProviderV3::UserReserveData,
 };
 use alloy::primitives::{Address, U256};
 use alloy::providers::RootProvider;
@@ -29,6 +29,36 @@ async fn get_token_symbol(provider: Arc<RootProvider<PubSubFrontend>>, token_add
             "UNK_OR_UNDEF_SYMBOL".to_string()
         }
     }
+}
+
+/// Get's the list of user reserves, but only returns those that the user has at least some debt or collateral and,
+/// for the later, the ones that are allowed to be used as collateral
+pub async fn get_user_reserves_data(
+    provider: Arc<RootProvider<PubSubFrontend>>,
+    user_address: Address,
+) -> Vec<UserReserveData> {
+    let ui_data =
+        AaveUIPoolDataProvider::new(AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, provider.clone());
+    let user_reserves_data = match ui_data
+        .getUserReservesData(AAVE_V3_PROVIDER_ADDRESS, user_address)
+        .call()
+        .await
+    {
+        Ok(user_reserves) => user_reserves._0,
+        Err(e) => {
+            eprintln!("Error trying to call AaveUIPoolDataProvider: {}", e);
+            std::process::exit(1);
+        }
+    };
+    user_reserves_data
+        .iter()
+        .filter(|reserve| {
+            reserve.scaledVariableDebt > U256::ZERO
+                || (reserve.scaledATokenBalance > U256::ZERO
+                    && reserve.usageAsCollateralEnabledOnUser)
+        })
+        .cloned()
+        .collect()
 }
 
 /// Fetches information on aave reserves and returns a map of reserve addresses to their configuration data, symbol and liquidation fee.
