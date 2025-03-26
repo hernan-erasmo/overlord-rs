@@ -31,6 +31,7 @@ async fn get_token_symbol(provider: Arc<RootProvider<PubSubFrontend>>, token_add
     }
 }
 
+/// Fetches information on aave reserves and returns a map of reserve addresses to their configuration data, symbol and liquidation fee.
 pub async fn generate_reserve_details_by_asset(
     provider: Arc<RootProvider<PubSubFrontend>>,
 ) -> Result<ReserveConfigurationData, Box<dyn std::error::Error>> {

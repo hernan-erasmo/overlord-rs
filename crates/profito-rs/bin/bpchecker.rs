@@ -960,7 +960,6 @@ async fn main() {
     );
 
     // Get user reserves data
-    // TODO(Hernan): can we remove this as part of the streamlining of generate_reserve_details_by_asset?
     let user_reserves_data = get_user_reserves_data(provider.clone(), user_address).await;
 
     // Create reserve configuration struct
