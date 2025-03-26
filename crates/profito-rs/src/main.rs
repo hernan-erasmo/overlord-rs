@@ -6,7 +6,7 @@ mod utils;
 
 use alloy::{providers::RootProvider, pubsub::PubSubFrontend};
 use cache::{PriceCache, ProviderCache};
-use calculations::get_best_debt_collateral_pair;
+use calculations::get_best_liquidation_opportunity;
 use constants::*;
 use overlord_shared_types::UnderwaterUserEvent;
 use sol_bindings::AaveOracle;
@@ -55,7 +55,7 @@ async fn process_uw_event(
         Arc<RootProvider<PubSubFrontend>>,
     > = AaveOracle::new(AAVE_ORACLE_ADDRESS, provider.clone());
 
-    if let Some(best_pair) = get_best_debt_collateral_pair(
+    if let Some(best_pair) = get_best_liquidation_opportunity(
         uw_event.address,
         reserves_configuration,
         user_reserves_data,

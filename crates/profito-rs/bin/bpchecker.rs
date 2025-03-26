@@ -863,6 +863,9 @@ async fn calculate_best_swap_fees(
 }
 
 /// Iterates over all available (collateral, debt) pairs and returns the best one
+/// The biggest difference between this one and the one from calculations.rs is the
+/// way they deal with prices (this one, from the fork itself, and the one from calculations,
+/// from the price cache)
 async fn get_best_liquidation_opportunity(
     assets_borrowed: Vec<UserReserveData>,
     assets_supplied: Vec<UserReserveData>,

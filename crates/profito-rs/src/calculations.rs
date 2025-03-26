@@ -187,7 +187,11 @@ pub fn calculate_actual_debt_to_liquidate(
     max_liquidatable_debt
 }
 
-pub async fn get_best_debt_collateral_pair(
+/// Not the same as the one from bpchecker
+/// The biggest difference between this one and the one from bpchecker.rs is the
+/// way they deal with prices (this one, from the price cache, and the one from bpchecker,
+/// from the fork itself)
+pub async fn get_best_liquidation_opportunity(
     candidate: Address,
     reserves_configuration: ReserveConfigurationData,
     user_reserve_data: Vec<UserReserveData>,
