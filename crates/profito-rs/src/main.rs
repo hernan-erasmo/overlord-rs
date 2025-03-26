@@ -9,13 +9,13 @@ use cache::{PriceCache, ProviderCache};
 use calculations::get_best_debt_collateral_pair;
 use constants::*;
 use overlord_shared_types::UnderwaterUserEvent;
-use sol_bindings::{AaveOracle, AaveUIPoolDataProvider};
+use sol_bindings::AaveOracle;
 use std::{sync::Arc, time::Instant};
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use tracing_appender::rolling::{self, Rotation};
 use tracing_subscriber::fmt::{time::LocalTime, writer::BoxMakeWriter};
-use utils::{generate_reserve_details_by_asset, ReserveConfigurationData};
+use utils::{generate_reserve_details_by_asset, ReserveConfigurationData, get_user_reserves_data};
 
 fn _setup_logging() {
     let log_file = rolling::RollingFileAppender::new(
@@ -38,62 +38,54 @@ async fn process_uw_event(
     price_cache: Arc<tokio::sync::Mutex<PriceCache>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let process_uw_event_timer = Instant::now();
-    match provider_cache.get_provider().await {
-        Ok(provider) => {
-            let ui_data = AaveUIPoolDataProvider::new(
-                AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS,
-                provider.clone(),
-            );
-            let aave_oracle: AaveOracle::AaveOracleInstance<
-                PubSubFrontend,
-                Arc<RootProvider<PubSubFrontend>>,
-            > = AaveOracle::new(AAVE_ORACLE_ADDRESS, provider.clone());
-
-            match ui_data
-                .getUserReservesData(AAVE_V3_PROVIDER_ADDRESS, uw_event.address)
-                .call()
-                .await
-            {
-                Ok(user_reserves_data) => {
-                    if !price_cache
-                        .lock()
-                        .await
-                        .override_price(uw_event.trace_id.clone(), uw_event.new_asset_prices)
-                        .await
-                    {
-                        warn!("Price(s) for uw_event with trace_id {} couldn't be overriden. Next calculations won't consider the pending price update TX values.", uw_event.trace_id);
-                    }
-                    if let Some(best_pair) = get_best_debt_collateral_pair(
-                        uw_event.address,
-                        reserves_configuration,
-                        user_reserves_data._0,
-                        uw_event.user_account_data.healthFactor,
-                        price_cache,
-                        uw_event.trace_id.clone(),
-                        aave_oracle.clone(),
-                    )
-                    .await
-                    {
-                        info!(
-                            "opportunity analysis for {} @ {}: highest profit before TX fees ${} - ({:?})",
-                            uw_event.address,
-                            uw_event.trace_id.clone(),
-                            best_pair.net_profit,
-                            process_uw_event_timer.elapsed(),
-                        );
-                    } else {
-                        warn!(
-                            "No profitable liquidation pair found for {}",
-                            uw_event.address
-                        );
-                    }
-                }
-                Err(e) => {
-                    warn!("Failed to fetch user reserves data: {e}");
-                }
-            }
+    let provider = match provider_cache.get_provider().await {
+        Ok(provider) => provider,
+        Err(e) => {
+            warn!("Failed to get the provider for uw processing: {e}");
+            return Err(e);
         }
-        Err(e) => warn!("Failed to get the provider for uw processing: {e}"),
+    };
+    let user_reserves_data = get_user_reserves_data(provider.clone(), uw_event.address).await;
+    if user_reserves_data.len() == 0 {
+        return Err("User reserves data came back empty".into());
+    };
+
+    if !price_cache
+        .lock()
+        .await
+        .override_price(uw_event.trace_id.clone(), uw_event.new_asset_prices)
+        .await
+    {
+        warn!("Price(s) for uw_event with trace_id {} couldn't be overriden. Next calculations won't consider the pending price update TX values.", uw_event.trace_id);
+    }
+    let aave_oracle: AaveOracle::AaveOracleInstance<
+        PubSubFrontend,
+        Arc<RootProvider<PubSubFrontend>>,
+    > = AaveOracle::new(AAVE_ORACLE_ADDRESS, provider.clone());
+
+    if let Some(best_pair) = get_best_debt_collateral_pair(
+        uw_event.address,
+        reserves_configuration,
+        user_reserves_data,
+        uw_event.user_account_data.healthFactor,
+        price_cache,
+        uw_event.trace_id.clone(),
+        aave_oracle.clone(),
+    )
+    .await
+    {
+        info!(
+            "opportunity analysis for {} @ {}: highest profit before TX fees ${} - ({:?})",
+            uw_event.address,
+            uw_event.trace_id.clone(),
+            best_pair.net_profit,
+            process_uw_event_timer.elapsed(),
+        );
+    } else {
+        warn!(
+            "No profitable liquidation pair found for {}",
+            uw_event.address
+        );
     }
     Ok(())
 }
