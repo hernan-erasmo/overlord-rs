@@ -15,7 +15,7 @@ use profito_rs::{
         IUiPoolDataProviderV3::{AggregatedReserveData, UserReserveData},
         UniswapV3Factory, UniswapV3Pool, ERC20,
     },
-    utils::{ReserveConfigurationEnhancedData, generate_reserve_details_by_asset},
+    utils::{ReserveConfigurationEnhancedData, generate_reserve_details_by_asset, get_user_reserves_data},
 };
 use std::{collections::HashMap, env, sync::Arc};
 
@@ -27,36 +27,6 @@ struct BestPair {
     actual_collateral_to_liquidate: U256,
     actual_debt_to_liquidate: U256,
     liquidation_protocol_fee_amount: U256,
-}
-
-/// Get's the list of user reserves, but only returns those that the user has at least some debt or collateral and,
-/// for the later, the ones that are allowed to be used as collateral
-async fn get_user_reserves_data(
-    provider: Arc<RootProvider<PubSubFrontend>>,
-    user_address: Address,
-) -> Vec<UserReserveData> {
-    let ui_data =
-        AaveUIPoolDataProvider::new(AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, provider.clone());
-    let user_reserves_data = match ui_data
-        .getUserReservesData(AAVE_V3_PROVIDER_ADDRESS, user_address)
-        .call()
-        .await
-    {
-        Ok(user_reserves) => user_reserves._0,
-        Err(e) => {
-            eprintln!("Error trying to call AaveUIPoolDataProvider: {}", e);
-            std::process::exit(1);
-        }
-    };
-    user_reserves_data
-        .iter()
-        .filter(|reserve| {
-            reserve.scaledVariableDebt > U256::ZERO
-                || (reserve.scaledATokenBalance > U256::ZERO
-                    && reserve.usageAsCollateralEnabledOnUser)
-        })
-        .cloned()
-        .collect()
 }
 
 async fn get_user_health_factor(provider: Arc<RootProvider<PubSubFrontend>>, user: Address) -> U256 {
@@ -935,131 +905,18 @@ async fn calculate_best_swap_fees(
     best_fees
 }
 
-#[tokio::main]
-async fn main() {
-    let args: Vec<String> = env::args().collect();
-
-    if args.len() <= 2 {
-        eprintln!("Usage: {} <address> [path_to_ipc]", args[0]);
-        std::process::exit(1);
-    }
-
-    let ipc_path = args.get(2).map_or("/tmp/reth.ipc", |path| path.as_str());
-
-    let user_address: Address = args[1].parse().expect("Invalid address format");
-
-    // Setup provider
-    let ipc = IpcConnect::new(ipc_path.to_string());
-    let provider = ProviderBuilder::new().on_ipc(ipc).await.unwrap();
-    let provider = Arc::new(provider);
-
-    let block_number = provider.get_block_number().await.unwrap_or_default();
-    println!(
-        "Received address: {:?} at block {} (IPC: {})",
-        user_address, block_number, ipc_path,
-    );
-
-    // Get user reserves data
-    let user_reserves_data = get_user_reserves_data(provider.clone(), user_address).await;
-
-    // Create reserve configuration struct
-    let reserves_configuration =
-        generate_reserve_details_by_asset(provider.clone()).await.unwrap();
-    let assets_borrowed = user_reserves_data
-        .iter()
-        .filter(|reserve| reserve.scaledVariableDebt > U256::ZERO)
-        .cloned()
-        .collect::<Vec<UserReserveData>>();
-    let assets_supplied = user_reserves_data
-        .iter()
-        .filter(|reserve| {
-            reserve.usageAsCollateralEnabledOnUser && reserve.scaledATokenBalance > U256::ZERO
-        })
-        .cloned()
-        .collect::<Vec<UserReserveData>>();
-
-    // Get reserves data (not to be confused with UserReserveData) and reserves_list, which are aligned
-    // (read `calculate_user_account_data()` comments about what this means)
-    // `reserves_data` is Vec<AggregatedReserveData> and holds information about reserves in general,
-    // while `user_reserves_data` holds information about a particular user's reserves
-    // they're not the same
-    let reserves_list = get_reserves_list(provider.clone()).await;
-    let reserves_data = get_reserves_data(provider.clone()).await;
-
-    // Calculate user account data
-    let (total_collateral_in_base_currency, total_debt_in_base_currency, health_factor_v33) =
-        calculate_user_account_data(
-            provider.clone(),
-            user_address,
-            reserves_list.clone(),
-            reserves_data.clone(),
-        )
-        .await;
-    println!("\n### User HF (value calculated with v3.3) ###");
-    println!(
-        "\t Total collateral (in base units): {}",
-        total_collateral_in_base_currency
-    );
-    println!(
-        "\t Total debt (in base units): {}",
-        total_debt_in_base_currency
-    );
-    println!(
-        "\t Health Factor: {}",
-        format_units(health_factor_v33, "eth").unwrap()
-    );
-
-    let user_health_factor = get_user_health_factor(provider.clone(), user_address).await;
-    println!("\n### User HF (value GET'd) ###");
-    println!("\t {}", format_units(user_health_factor, "eth").unwrap());
-
-    // Print user reserves data
-    println!("\n### User DEBT (from getUserReservesData() array) ###");
-    for reserve in assets_borrowed.clone() {
-        let symbol = reserves_configuration
-            .get(&reserve.underlyingAsset)
-            .unwrap()
-            .symbol
-            .clone();
-        let decimals = reserves_configuration
-            .get(&reserve.underlyingAsset)
-            .unwrap()
-            .data
-            .decimals
-            .to::<u8>();
-        println!(
-            "\t{} - {} ({:?} units)",
-            symbol,
-            reserve.scaledVariableDebt,
-            format_units(reserve.scaledVariableDebt, decimals).unwrap(),
-        );
-    }
-    println!("\n### User COLLATERAL (from getUserReservesData() array) ###");
-    for reserve in assets_supplied.clone() {
-        let symbol = reserves_configuration
-            .get(&reserve.underlyingAsset)
-            .unwrap()
-            .symbol
-            .clone();
-        let decimals = reserves_configuration
-            .get(&reserve.underlyingAsset)
-            .unwrap()
-            .data
-            .decimals
-            .to::<u8>();
-        println!(
-            "\t{} - {} ({:?} units)",
-            symbol,
-            reserve.scaledATokenBalance,
-            format_units(reserve.scaledATokenBalance, decimals).unwrap(),
-        )
-    }
-
-    // Print number of possible combinations
-    println!("\n### Liquidation path analysis ###");
-
-    // Start iterating over available pairs
-    // essentially inspecting executeLiquidationCall internals
+/// Iterates over all available (collateral, debt) pairs and returns the best one
+async fn get_best_liquidation_opportunity(
+    assets_borrowed: Vec<UserReserveData>,
+    assets_supplied: Vec<UserReserveData>,
+    reserves_configuration: HashMap<Address, ReserveConfigurationEnhancedData>,
+    reserves_data: Vec<AggregatedReserveData>,
+    provider: Arc<RootProvider<PubSubFrontend>>,
+    user_address: Address,
+    health_factor_v33: U256,
+    total_debt_in_base_currency: U256,
+) -> Option<BestPair> {
+    // Essentially, inspect executeLiquidationCall internals
     // for every collateral/debt pair possible
     let mut best_pair: Option<BestPair> = None;
     let total_combinations = assets_borrowed.len() * assets_supplied.len();
@@ -1206,9 +1063,143 @@ async fn main() {
             current_count += 1;
         }
     }
+    best_pair
+}
+
+#[tokio::main]
+async fn main() {
+    let args: Vec<String> = env::args().collect();
+
+    if args.len() <= 2 {
+        eprintln!("Usage: {} <address> [path_to_ipc]", args[0]);
+        std::process::exit(1);
+    }
+
+    let ipc_path = args.get(2).map_or("/tmp/reth.ipc", |path| path.as_str());
+
+    let user_address: Address = args[1].parse().expect("Invalid address format");
+
+    // Setup provider
+    let ipc = IpcConnect::new(ipc_path.to_string());
+    let provider = ProviderBuilder::new().on_ipc(ipc).await.unwrap();
+    let provider = Arc::new(provider);
+
+    let block_number = provider.get_block_number().await.unwrap_or_default();
+    println!(
+        "Received address: {:?} at block {} (IPC: {})",
+        user_address, block_number, ipc_path,
+    );
+
+    // Get user reserves data
+    let user_reserves_data = get_user_reserves_data(provider.clone(), user_address).await;
+
+    // Create reserve configuration struct
+    let reserves_configuration =
+        generate_reserve_details_by_asset(provider.clone()).await.unwrap();
+    let assets_borrowed = user_reserves_data
+        .iter()
+        .filter(|reserve| reserve.scaledVariableDebt > U256::ZERO)
+        .cloned()
+        .collect::<Vec<UserReserveData>>();
+    let assets_supplied = user_reserves_data
+        .iter()
+        .filter(|reserve| {
+            reserve.usageAsCollateralEnabledOnUser && reserve.scaledATokenBalance > U256::ZERO
+        })
+        .cloned()
+        .collect::<Vec<UserReserveData>>();
+
+    // Get reserves data (not to be confused with UserReserveData) and reserves_list, which are aligned
+    // (read `calculate_user_account_data()` comments about what this means)
+    // `reserves_data` is Vec<AggregatedReserveData> and holds information about reserves in general,
+    // while `user_reserves_data` holds information about a particular user's reserves
+    // they're not the same
+    let reserves_list = get_reserves_list(provider.clone()).await;
+    let reserves_data = get_reserves_data(provider.clone()).await;
+
+    // Calculate user account data
+    let (total_collateral_in_base_currency, total_debt_in_base_currency, health_factor_v33) =
+        calculate_user_account_data(
+            provider.clone(),
+            user_address,
+            reserves_list.clone(),
+            reserves_data.clone(),
+        )
+        .await;
+    println!("\n### User HF (value calculated with v3.3) ###");
+    println!(
+        "\t Total collateral (in base units): {}",
+        total_collateral_in_base_currency
+    );
+    println!(
+        "\t Total debt (in base units): {}",
+        total_debt_in_base_currency
+    );
+    println!(
+        "\t Health Factor: {}",
+        format_units(health_factor_v33, "eth").unwrap()
+    );
+
+    let user_health_factor = get_user_health_factor(provider.clone(), user_address).await;
+    println!("\n### User HF (value GET'd) ###");
+    println!("\t {}", format_units(user_health_factor, "eth").unwrap());
+
+    // Print user reserves data
+    println!("\n### User DEBT (from getUserReservesData() array) ###");
+    for reserve in assets_borrowed.clone() {
+        let symbol = reserves_configuration
+            .get(&reserve.underlyingAsset)
+            .unwrap()
+            .symbol
+            .clone();
+        let decimals = reserves_configuration
+            .get(&reserve.underlyingAsset)
+            .unwrap()
+            .data
+            .decimals
+            .to::<u8>();
+        println!(
+            "\t{} - {} ({:?} units)",
+            symbol,
+            reserve.scaledVariableDebt,
+            format_units(reserve.scaledVariableDebt, decimals).unwrap(),
+        );
+    }
+    println!("\n### User COLLATERAL (from getUserReservesData() array) ###");
+    for reserve in assets_supplied.clone() {
+        let symbol = reserves_configuration
+            .get(&reserve.underlyingAsset)
+            .unwrap()
+            .symbol
+            .clone();
+        let decimals = reserves_configuration
+            .get(&reserve.underlyingAsset)
+            .unwrap()
+            .data
+            .decimals
+            .to::<u8>();
+        println!(
+            "\t{} - {} ({:?} units)",
+            symbol,
+            reserve.scaledATokenBalance,
+            format_units(reserve.scaledATokenBalance, decimals).unwrap(),
+        )
+    }
+
+    // Print number of possible combinations
+    println!("\n### Liquidation path analysis ###");
 
     println!("\n### Most profitable liquidation opportunity ###");
-    if let Some(best) = best_pair {
+    if let Some(best) = get_best_liquidation_opportunity(
+        assets_borrowed,
+        assets_supplied,
+        reserves_configuration.clone(),
+        reserves_data.clone(),
+        provider.clone(),
+        user_address,
+        health_factor_v33,
+        total_debt_in_base_currency,
+    ).await {
         let debt_symbol = reserves_configuration
             .get(&best.debt_asset)
             .unwrap()
