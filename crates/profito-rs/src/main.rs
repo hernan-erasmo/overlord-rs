@@ -6,7 +6,7 @@ mod utils;
 
 use alloy::{providers::RootProvider, pubsub::PubSubFrontend};
 use cache::{PriceCache, ProviderCache};
-use calculations::get_best_liquidation_opportunity;
+use calculations::{get_best_liquidation_opportunity, get_reserves_list, get_reserves_data};
 use constants::*;
 use overlord_shared_types::UnderwaterUserEvent;
 use sol_bindings::AaveOracle;
@@ -54,6 +54,20 @@ async fn process_uw_event(
         PubSubFrontend,
         Arc<RootProvider<PubSubFrontend>>,
     > = AaveOracle::new(AAVE_ORACLE_ADDRESS, provider.clone());
+
+    let reserves_list = match get_reserves_list(provider.clone()).await {
+        Ok(reserves_list) => reserves_list,
+        Err(e) => {
+            return Err(e)
+        }
+    };
+
+    let reserves_data = match get_reserves_data(provider.clone()).await {
+        Ok(reserves_data) => reserves_data,
+        Err(e) => {
+            return Err(e)
+        }
+    };
 
     if let Some(best_pair) = get_best_liquidation_opportunity(
         uw_event.address,
