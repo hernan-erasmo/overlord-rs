@@ -1,7 +1,7 @@
 use crate::constants::{AAVE_ORACLE_ADDRESS, AAVE_V3_POOL_ADDRESS, AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS, AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, AAVE_V3_PROVIDER_ADDRESS, UNISWAP_V3_FACTORY, UNISWAP_V3_QUOTER};
 use alloy::{
-    primitives::{aliases::U24, Address, U160, U256},
-    providers::RootProvider,
+    primitives::{aliases::U24, utils::format_units, Address, U160, U256},
+    providers::{Provider, RootProvider},
     pubsub::PubSubFrontend,
 };
 use std::sync::Arc;
@@ -16,15 +16,14 @@ use super::{
 };
 use tracing::warn;
 
-pub struct DebtCollateralPairInfo {
-    pub debt_asset: Address,
-    pub debt_symbol: String,
-    pub debt_amount: U256,
-    pub debt_in_collateral_units: U256,
+#[derive(Debug)]
+pub struct BestPair {
     pub collateral_asset: Address,
-    pub collateral_symbol: String,
-    pub collateral_amount: U256,
-    pub net_profit: String,
+    pub debt_asset: Address,
+    pub net_profit: U256,
+    pub actual_collateral_to_liquidate: U256,
+    pub actual_debt_to_liquidate: U256,
+    pub liquidation_protocol_fee_amount: U256,
 }
 
 pub struct BestFlashSwapArgs {
@@ -402,6 +401,7 @@ pub async fn calculate_user_account_data(
     user_address: Address,
     reserves_list: Vec<Address>,
     reserves_data: Vec<AggregatedReserveData>,
+    trace_id: Option<String>,
 ) -> Result<(U256, U256, U256), Box<dyn std::error::Error>> {
     // Capture required input arguments
     let mut total_collateral_in_base_currency = U256::ZERO;
@@ -433,7 +433,7 @@ pub async fn calculate_user_account_data(
         let liquidation_threshold = reserves_data[i].reserveLiquidationThreshold;
         let decimals = reserves_data[i].decimals;
         let asset_unit = U256::from(10).pow(U256::from(decimals));
-        let asset_price = match price_cache.lock().await.get_price(reserve_address, None, AaveOracle::new(AAVE_ORACLE_ADDRESS, provider.clone())).await {
+        let asset_price = match price_cache.lock().await.get_price(reserve_address, trace_id.clone(), AaveOracle::new(AAVE_ORACLE_ADDRESS, provider.clone())).await {
             Ok(price) => price,
             Err(e) => {
                 return Err(format!("Error trying to get price for {}: {}", reserve_address, e).into())
@@ -522,22 +522,122 @@ pub async fn calculate_user_account_data(
     )
 }
 
+/// This function is supposed to be the EXACT SAME copy of the one defined
+/// in bpchecker, with the only difference being the removal of print statements
+/// and different error handling. Logic MUST BE THE SAME. The problem is that
+/// I don't have time to refactor those out now.
+/// 
+/// In the future, if you have time, try to figure out a way of adding a debug
+/// mode, or something like that, so that the print statements are only executed
+/// when called from bpchecker, and then you'll be able to remove this duplicate logic
+async fn calculate_available_collateral_to_liquidate(
+    provider: Arc<RootProvider<PubSubFrontend>>,
+    collateral_asset: Address,
+    collateral_decimals: U256,
+    // all original args for this function under this line
+    collateral_asset_price: U256,
+    collateral_asset_unit: U256,
+    debt_asset_price: U256,
+    debt_asset_unit: U256,
+    mut debt_to_cover: U256,
+    user_collateral_balance: U256,
+    liquidation_bonus: U256,
+) -> Result<(U256, U256, U256, U256, U256), Box<dyn std::error::Error>> {
+    // Implementation of
+    // https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L633
+    let mut collateral_amount = U256::ZERO;
+    let mut debt_amount_needed = U256::ZERO;
+    let mut liquidation_protocol_fee = U256::ZERO;
+    let mut collateral_to_liquidate_in_base_currency = U256::ZERO;
+
+    let protocol =
+        AaveProtocolDataProvider::new(AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS, provider.clone());
+    let liquidation_protocol_fee_percentage = match protocol
+        .getLiquidationProtocolFee(collateral_asset)
+        .call()
+        .await
+    {
+        Ok(response) => response._0,
+        Err(e) => return Err(format!("Error trying to call collateralAToken.balanceOf(): {}", e).into())
+    };
+    let base_collateral = (debt_asset_price * debt_to_cover * collateral_asset_unit)
+        / (collateral_asset_price * debt_asset_unit);
+    let max_collateral_to_liquidate = percent_mul(base_collateral, liquidation_bonus);
+
+    if max_collateral_to_liquidate > user_collateral_balance {
+        collateral_amount = user_collateral_balance;
+        debt_amount_needed = (collateral_asset_price * collateral_amount * debt_asset_unit)
+            / percent_div(
+                debt_asset_price * collateral_asset_unit,
+                liquidation_bonus,
+            )
+    } else {
+        collateral_amount = max_collateral_to_liquidate;
+        debt_amount_needed = debt_to_cover;
+    }
+
+    collateral_to_liquidate_in_base_currency =
+        (collateral_amount * collateral_asset_price) / collateral_asset_unit;
+    if liquidation_protocol_fee_percentage != U256::ZERO {
+        let bonus_collateral =
+            collateral_amount - percent_div(collateral_amount, liquidation_bonus);
+        liquidation_protocol_fee =
+            percent_mul(bonus_collateral, liquidation_protocol_fee_percentage);
+        collateral_amount -= liquidation_protocol_fee;
+    }
+
+    // THIS IS THE CORE OF THE CALCULATION, WHAT DECIDES WHETHER OR NOT WE MOVE ON WITH THE EXECUTION
+    // this section doesn't belong to the original solidity function
+    let debt_in_collateral_units = (debt_amount_needed * debt_asset_price * collateral_asset_unit)
+        / (collateral_asset_price * debt_asset_unit);
+    // This already has the liquidation fee deducted
+    let base_profit = if collateral_amount >= debt_in_collateral_units {
+        collateral_amount - debt_in_collateral_units
+    } else {
+        debt_in_collateral_units - collateral_amount
+    };
+
+    // TODO(Hernan): make gas and swap calculations more sophisticated
+    let gas_used_estimation = U256::from(1000000);
+    let gas_price_in_gwei = match provider.get_gas_price().await {
+        Ok(price) => U256::from(price) / U256::from(1e3),
+        _ => U256::MAX,
+    };
+    let execution_gas_cost = (gas_used_estimation * gas_price_in_gwei) / U256::from(1000000);
+    // this assumes we will swap in 1% fee pools (could be more sophisticated)
+    // uniswap v3 fees are represented as hundredths of basis points: 1% == 100; 0,3% == 30; 0,05% == 5; 0,01% == 1
+    let swap_loss_factor = U256::from(100);
+    let swap_total_cost = percent_mul(collateral_amount, swap_loss_factor);
+    let net_profit = base_profit - execution_gas_cost - swap_total_cost;
+    Ok((
+        collateral_amount,
+        debt_amount_needed,
+        liquidation_protocol_fee,
+        collateral_to_liquidate_in_base_currency,
+        net_profit,
+    ))
+}
+
 /// Not exactly the same as the one from bpchecker
 /// The biggest difference between this one and the one from bpchecker.rs is the
 /// way they deal with prices (this one, from the price cache, and the one from bpchecker,
 /// from the fork itself)
+/// This function also assumes trace_id will always be NOT none, as opposed to the one in bpchecker
+/// which passes none since it's only for compatibility purposes with the price cache integration
+/// in some of the helper functions.
 pub async fn get_best_liquidation_opportunity(
-    candidate: Address,
+    user_reserve_data: Vec<UserReserveData>, // for borrowed_reserve and supplied_reserve
+    reserves_data: Vec<AggregatedReserveData>,
     reserves_configuration: ReserveConfigurationData,
-    user_reserve_data: Vec<UserReserveData>,
-    user_health_factor: U256,
+    user_address: Address,
+    health_factor_v33: U256,
+    total_debt_in_base_currency: U256,
     price_cache: Arc<tokio::sync::Mutex<PriceCache>>,
+    provider: Arc<RootProvider<PubSubFrontend>>,
     trace_id: String,
     oracle: AaveOracle::AaveOracleInstance<PubSubFrontend, Arc<RootProvider<PubSubFrontend>>>,
-) -> Option<DebtCollateralPairInfo> {
-    let mut best_pair: Option<DebtCollateralPairInfo> = None;
-    let mut max_net_profit = U256::from(0);
-
+) -> Option<BestPair> {
+    let mut best_pair: Option<BestPair> = None;
     for borrowed_reserve in user_reserve_data
         .iter()
         .filter(|r| r.scaledVariableDebt > U256::ZERO)
@@ -546,28 +646,96 @@ pub async fn get_best_liquidation_opportunity(
             .iter()
             .filter(|r| r.usageAsCollateralEnabledOnUser && r.scaledATokenBalance > U256::ZERO)
         {
+            // begin section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L234-L238
+            let (
+                collateral_reserve,
+                user_collateral_balance,
+                debt_reserve,
+                user_reserve_debt
+            ) = match calculate_user_balances(
+                reserves_data.clone(),
+                supplied_reserve,
+                borrowed_reserve,
+                provider.clone(),
+                user_address,
+            ).await {
+                Ok(result) => result,
+                Err(e) => {
+                    warn!("Error calculating user balances: {}", e);
+                    continue;
+                }
+            };
+            // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L234-L238
 
+            // begin section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L252-L276
+            // TODO(Hernan): you should at least visually check if liquidationBonus is returning what you're expecting, since
+            // the solidity implementation uses bit masking to get the value.
+            let liquidation_bonus = collateral_reserve.reserveLiquidationBonus;
+            let collateral_asset_price = price_cache.lock().await.get_price(supplied_reserve.underlyingAsset, Some(trace_id.clone()), oracle.clone()).await.unwrap();
+            let debt_asset_price = price_cache.lock().await.get_price(borrowed_reserve.underlyingAsset, Some(trace_id.clone()), oracle.clone()).await.unwrap();
+            let collateral_asset_unit = U256::from(10).pow(collateral_reserve.decimals);
+            let debt_asset_unit = U256::from(10).pow(debt_reserve.decimals);
+            let user_reserve_debt_in_base_currency =
+                user_reserve_debt * debt_asset_price / debt_asset_unit;
+            let user_reserve_collateral_in_base_currency =
+                user_collateral_balance * collateral_asset_price / collateral_asset_unit;
+            // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L252-L276
+
+            // begin section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L278-L302
+            let actual_debt_to_liquidate = calculate_actual_debt_to_liquidate(
+                user_reserve_debt,
+                user_reserve_collateral_in_base_currency,
+                user_reserve_debt_in_base_currency,
+                health_factor_v33,
+                total_debt_in_base_currency,
+                debt_asset_unit,
+                debt_asset_price,
+            );
+            // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L278-L302
+
+            // begin section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L309
+            let (
+                actual_collateral_to_liquidate,
+                actual_debt_to_liquidate,
+                liquidation_protocol_fee_amount,
+                collateral_to_liquidate_in_base_currency,
+                net_profit,
+            ) = match calculate_available_collateral_to_liquidate(
+                provider.clone(),
+                collateral_reserve.underlyingAsset,
+                collateral_reserve.decimals,
+                collateral_asset_price,
+                collateral_asset_unit,
+                debt_asset_price,
+                debt_asset_unit,
+                actual_debt_to_liquidate,
+                user_collateral_balance,
+                liquidation_bonus,
+            )
+            .await {
+                Ok(result) => result,
+                Err(e) => {
+                    warn!("Error calculating available collateral to liquidate: {}", e);
+                    continue;
+                }
+            };
+            // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L309
+
+            // begin section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L320-L344
+            // TODO(Hernan): do we need to make sure this doesn't bite us in the ass?
+            // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L320-L344
+
+            if net_profit > best_pair.as_ref().map_or(U256::ZERO, |p| p.net_profit) {
+                best_pair = Some(BestPair {
+                    collateral_asset: supplied_reserve.underlyingAsset,
+                    debt_asset: borrowed_reserve.underlyingAsset,
+                    net_profit,
+                    actual_collateral_to_liquidate,
+                    actual_debt_to_liquidate,
+                    liquidation_protocol_fee_amount,
+                });
+            }
         }
     }
-
-
-
-
-
-
-
-    // TODO: Implement the rest of the function
-
-
-
-
-
-
-
-
-
-
-
-
     best_pair
 }

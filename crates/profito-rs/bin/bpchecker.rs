@@ -6,6 +6,7 @@ use alloy::{
 use profito_rs::cache::PriceCache;
 use profito_rs::{
     calculations::{
+        BestPair,
         percent_div,
         percent_mul,
         calculate_actual_debt_to_liquidate,
@@ -27,16 +28,6 @@ use profito_rs::{
 };
 use std::{collections::HashMap, env, sync::Arc};
 use tokio::sync::Mutex;
-
-#[derive(Debug)]
-struct BestPair {
-    collateral_asset: Address,
-    debt_asset: Address,
-    net_profit: U256,
-    actual_collateral_to_liquidate: U256,
-    actual_debt_to_liquidate: U256,
-    liquidation_protocol_fee_amount: U256,
-}
 
 async fn get_user_health_factor(provider: Arc<RootProvider<PubSubFrontend>>, user: Address) -> U256 {
     let pool = AaveV3Pool::new(AAVE_V3_POOL_ADDRESS, provider.clone());
@@ -137,7 +128,8 @@ async fn get_asset_price(provider: Arc<RootProvider<PubSubFrontend>>, asset: Add
     }
 }
 
-/// https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L633
+/// ANY CHANGES TO THIS FUNCTION MUST ALSO BE REPLICATED IN THE
+/// ONE DEFINED IN calculations.rs (SEE THAT FUNCTION DOCS FOR CONTEXT)
 async fn calculate_available_collateral_to_liquidate(
     provider: Arc<RootProvider<PubSubFrontend>>,
     collateral_asset: Address,
@@ -151,6 +143,7 @@ async fn calculate_available_collateral_to_liquidate(
     user_collateral_balance: U256,
     liquidation_bonus: U256,
 ) -> (U256, U256, U256, U256, U256) {
+    // https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L633
     let mut collateral_amount = U256::ZERO;
     let mut debt_amount_needed = U256::ZERO;
     let mut liquidation_protocol_fee = U256::ZERO;
@@ -552,6 +545,7 @@ async fn main() {
             user_address,
             reserves_list.clone(),
             reserves_data.clone(),
+            None,
         ).await {
             Ok((collateral, debt, hf)) => (collateral, debt, hf),
             Err(e) => {

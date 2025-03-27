@@ -6,7 +6,7 @@ mod utils;
 
 use alloy::{providers::RootProvider, pubsub::PubSubFrontend};
 use cache::{PriceCache, ProviderCache};
-use calculations::{get_best_liquidation_opportunity, get_reserves_list, get_reserves_data};
+use calculations::{get_best_liquidation_opportunity, get_reserves_list, get_reserves_data, calculate_user_account_data};
 use constants::*;
 use overlord_shared_types::UnderwaterUserEvent;
 use sol_bindings::AaveOracle;
@@ -45,8 +45,8 @@ async fn process_uw_event(
             return Err(e);
         }
     };
-    let user_reserves_data = get_user_reserves_data(provider.clone(), uw_event.address).await;
-    if user_reserves_data.len() == 0 {
+    let user_reserve_data = get_user_reserves_data(provider.clone(), uw_event.address).await;
+    if user_reserve_data.len() == 0 {
         return Err("User reserves data came back empty".into());
     };
 
@@ -69,12 +69,33 @@ async fn process_uw_event(
         }
     };
 
+    let (
+        total_collateral_in_base_currency,
+        total_debt_in_base_currency,
+        health_factor_v33
+    ) = match calculate_user_account_data(
+            price_cache.clone(),
+            provider.clone(),
+            uw_event.address,
+            reserves_list.clone(),
+            reserves_data.clone(),
+            Some(uw_event.trace_id.clone()),
+        ).await {
+            Ok((collateral, debt, hf)) => (collateral, debt, hf),
+            Err(e) => {
+                return Err(format!("Error calculating user account data: {}", e).into());
+            }
+        };
+
     if let Some(best_pair) = get_best_liquidation_opportunity(
-        uw_event.address,
+        user_reserve_data,
+        reserves_data,
         reserves_configuration,
-        user_reserves_data,
-        uw_event.user_account_data.healthFactor,
+        uw_event.address,
+        health_factor_v33,
+        total_debt_in_base_currency,
         price_cache,
+        provider.clone(),
         uw_event.trace_id.clone(),
         aave_oracle.clone(),
     )
