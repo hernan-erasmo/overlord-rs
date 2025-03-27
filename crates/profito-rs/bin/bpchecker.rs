@@ -3,21 +3,22 @@ use alloy::{
     providers::{IpcConnect, Provider, ProviderBuilder, RootProvider},
     pubsub::PubSubFrontend,
 };
+use profito_rs::cache::PriceCache;
 use profito_rs::{
     calculations::{percent_div, percent_mul, calculate_actual_debt_to_liquidate, calculate_user_balances, get_reserves_list, get_reserves_data},
     constants::{
-        AAVE_ORACLE_ADDRESS, AAVE_V3_POOL_ADDRESS, AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS,
-        AAVE_V3_PROVIDER_ADDRESS, AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, UNISWAP_V3_FACTORY, WETH,
+        AAVE_ORACLE_ADDRESS, AAVE_V3_POOL_ADDRESS, AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS, UNISWAP_V3_FACTORY, WETH,
     },
     sol_bindings::{
         pool::AaveV3Pool,
-        AaveOracle, AaveProtocolDataProvider, AaveUIPoolDataProvider, IAToken,
+        AaveOracle, AaveProtocolDataProvider, IAToken,
         IUiPoolDataProviderV3::{AggregatedReserveData, UserReserveData},
         UniswapV3Factory, UniswapV3Pool, ERC20,
     },
     utils::{ReserveConfigurationEnhancedData, generate_reserve_details_by_asset, get_user_reserves_data},
 };
 use std::{collections::HashMap, env, sync::Arc};
+use tokio::sync::Mutex;
 
 #[derive(Debug)]
 struct BestPair {
@@ -231,6 +232,7 @@ async fn get_user_debt_in_base_currency(
 /// https://github.com/aave-dao/aave-v3-origin/blob/bb6ea42947f349fe8182a0ea30c5a7883d1f9ed1/src/contracts/protocol/libraries/logic/GenericLogic.sol#L63
 /// except for emode support. We don't do that here.
 async fn calculate_user_account_data(
+    price_cache: Arc<tokio::sync::Mutex<PriceCache>>,
     provider: Arc<RootProvider<PubSubFrontend>>,
     user_address: Address,
     reserves_list: Vec<Address>,
@@ -273,14 +275,10 @@ async fn calculate_user_account_data(
         let liquidation_threshold = reserves_data[i].reserveLiquidationThreshold;
         let decimals = reserves_data[i].decimals;
         let asset_unit = U256::from(10).pow(U256::from(decimals));
-        let asset_price = match AaveOracle::new(AAVE_ORACLE_ADDRESS, provider.clone())
-            .getAssetPrice(reserve_address)
-            .call()
-            .await
-        {
-            Ok(price_response) => price_response._0,
+        let asset_price = match price_cache.lock().await.get_price(reserve_address, None, AaveOracle::new(AAVE_ORACLE_ADDRESS, provider.clone())).await {
+            Ok(price) => price,
             Err(e) => {
-                eprintln!("Error trying to call getAssetPrice: {}", e);
+                eprintln!("Error trying to get price for {}: {}", reserve_address, e);
                 return user_account_data;
             }
         };
@@ -802,9 +800,14 @@ async fn main() {
     let reserves_list = get_reserves_list(provider.clone()).await.unwrap();
     let reserves_data = get_reserves_data(provider.clone()).await.unwrap();
 
+    // max_traces is 0 because we only use the price fetching feature for compatibility with
+    // `calculate_user_account_data`, not the actual cache.
+    let price_cache = Arc::new(Mutex::new(PriceCache::new(0)));
+
     // Calculate user account data
     let (total_collateral_in_base_currency, total_debt_in_base_currency, health_factor_v33) =
         calculate_user_account_data(
+            price_cache.clone(),
             provider.clone(),
             user_address,
             reserves_list.clone(),
