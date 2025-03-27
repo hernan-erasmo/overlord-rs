@@ -503,7 +503,16 @@ async fn calculate_available_collateral_to_liquidate(
     // uniswap v3 fees are represented as hundredths of basis points: 1% == 100; 0,3% == 30; 0,05% == 5; 0,01% == 1
     let swap_loss_factor = U256::from(100);
     let swap_total_cost = percent_mul(collateral_amount, swap_loss_factor);
-    let net_profit = base_profit - execution_gas_cost - swap_total_cost;
+    let total_cost = execution_gas_cost + swap_total_cost;
+
+    // this will cause some weird numbers in output logs for positions with a single possible
+    // pair, but would make sure no overflow errors accidentally replace the best pair
+    // when there are more than one combination
+    let net_profit = if total_cost > base_profit {
+        U256::MIN
+    } else {
+        base_profit - total_cost
+    };
     Ok((
         collateral_amount,
         debt_amount_needed,
