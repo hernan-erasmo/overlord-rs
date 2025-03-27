@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use tracing_appender::rolling::{self, Rotation};
 use tracing_subscriber::fmt::{time::LocalTime, writer::BoxMakeWriter};
-use utils::{generate_reserve_details_by_asset, ReserveConfigurationData, get_user_reserves_data};
+use utils::get_user_reserves_data;
 
 fn _setup_logging() {
     let log_file = rolling::RollingFileAppender::new(
@@ -33,7 +33,6 @@ fn _setup_logging() {
 
 async fn process_uw_event(
     uw_event: UnderwaterUserEvent,
-    reserves_configuration: ReserveConfigurationData,
     provider_cache: Arc<ProviderCache>,
     price_cache: Arc<tokio::sync::Mutex<PriceCache>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -90,7 +89,6 @@ async fn process_uw_event(
     if let Some(best_pair) = get_best_liquidation_opportunity(
         user_reserve_data,
         reserves_data,
-        reserves_configuration,
         uw_event.address,
         health_factor_v33,
         total_debt_in_base_currency,
@@ -133,17 +131,10 @@ async fn main() {
         "Listening for health factor alerts on {}",
         PROFITO_INBOUND_ENDPOINT
     );
-    let reserves_configuration = generate_reserve_details_by_asset(provider_cache.get_provider().await.unwrap())
-        .await
-        .unwrap_or_else(|e| {
-            error!("Failed to initialize reserve configuration: {}", e);
-            std::process::exit(1);
-        });
     loop {
         match socket.recv_bytes(0) {
             Ok(bytes) => match bincode::deserialize::<UnderwaterUserEvent>(&bytes) {
                 Ok(uw_event) => {
-                    let reserves_configuration = reserves_configuration.clone();
                     let provider_cache = provider_cache.clone();
                     let cloned_uw_event = uw_event.clone();
 
@@ -159,7 +150,6 @@ async fn main() {
                     tokio::spawn(async move {
                         if let Err(e) = process_uw_event(
                             uw_event,
-                            reserves_configuration,
                             provider_cache,
                             price_cache,
                         )
