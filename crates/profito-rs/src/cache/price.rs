@@ -83,9 +83,10 @@ impl PriceCache {
         trace_id: Option<String>,
         oracle: AaveOracle::AaveOracleInstance<PubSubFrontend, Arc<RootProvider<PubSubFrontend>>>,
     ) -> Result<U256, Box<dyn std::error::Error + Send + Sync>> {
-        if trace_id.is_none() {
+        if trace_id.is_none() || trace_id == Some("initial-run".to_string()) {
             // This means the caller wants the actual price, not an overriden one
-            // the caller is probably bpchecker, so we don't care about caching the price
+            // the caller is probably bpchecker or vega is initializing,
+            // so we don't care about caching the price
             return match oracle.getAssetPrice(reserve).call().await {
                 Ok(price_response) => Ok(price_response._0),
                 Err(e) => Err(format!("Couldn't fetch price for {}: {}", reserve, e).into()),
