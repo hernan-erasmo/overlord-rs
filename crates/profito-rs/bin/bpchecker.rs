@@ -237,7 +237,7 @@ async fn calculate_user_account_data(
     user_address: Address,
     reserves_list: Vec<Address>,
     reserves_data: Vec<AggregatedReserveData>,
-) -> (U256, U256, U256) {
+) -> Result<(U256, U256, U256), Box<dyn std::error::Error>> {
     // Capture required input arguments
     let mut total_collateral_in_base_currency = U256::ZERO;
     let mut total_debt_in_base_currency = U256::ZERO;
@@ -255,8 +255,7 @@ async fn calculate_user_account_data(
     {
         Ok(user_config) => user_config._0,
         Err(e) => {
-            eprintln!("Error trying to call getUserConfiguration: {}", e);
-            return user_account_data;
+            return Err(format!("Error trying to call getUserConfiguration: {}", e).into())
         }
     };
 
@@ -278,8 +277,7 @@ async fn calculate_user_account_data(
         let asset_price = match price_cache.lock().await.get_price(reserve_address, None, AaveOracle::new(AAVE_ORACLE_ADDRESS, provider.clone())).await {
             Ok(price) => price,
             Err(e) => {
-                eprintln!("Error trying to get price for {}: {}", reserve_address, e);
-                return user_account_data;
+                return Err(format!("Error trying to get price for {}: {}", reserve_address, e).into())
             }
         };
 
@@ -310,8 +308,7 @@ async fn calculate_user_account_data(
             {
                 Ok(response) => response._0,
                 Err(e) => {
-                    eprintln!("Error trying to call getIsVirtualAccActive: {}", e);
-                    false
+                    return Err(format!("Error trying to call getIsVirtualAccActive: {}", e).into())
                 }
             } {
                 let user_debt_in_base_currency = get_user_debt_in_base_currency(
@@ -335,8 +332,7 @@ async fn calculate_user_account_data(
                     {
                         Ok(balance_of_response) => balance_of_response.balance,
                         Err(e) => {
-                            eprintln!("Error trying to call balanceOf for {}: {}", user_address, e);
-                            U256::ZERO
+                            return Err(format!("Error trying to call balanceOf for {}: {}", user_address, e).into())
                         }
                     } * asset_price
                         / asset_unit;
@@ -359,10 +355,10 @@ async fn calculate_user_account_data(
     }
 
     // Return values
-    (
-        total_collateral_in_base_currency,
+    Ok(
+        ( total_collateral_in_base_currency,
         total_debt_in_base_currency,
-        health_factor,
+        health_factor)
     )
 }
 
@@ -805,15 +801,23 @@ async fn main() {
     let price_cache = Arc::new(Mutex::new(PriceCache::new(0)));
 
     // Calculate user account data
-    let (total_collateral_in_base_currency, total_debt_in_base_currency, health_factor_v33) =
-        calculate_user_account_data(
+    let (
+        total_collateral_in_base_currency,
+        total_debt_in_base_currency,
+        health_factor_v33
+    ) = match calculate_user_account_data(
             price_cache.clone(),
             provider.clone(),
             user_address,
             reserves_list.clone(),
             reserves_data.clone(),
-        )
-        .await;
+        ).await {
+            Ok((collateral, debt, hf)) => (collateral, debt, hf),
+            Err(e) => {
+                eprintln!("Error calculating user account data: {}", e);
+                std::process::exit(1);
+            }
+        };
     println!("\n### User HF (value calculated with v3.3) ###");
     println!(
         "\t Total collateral (in base units): {}",
