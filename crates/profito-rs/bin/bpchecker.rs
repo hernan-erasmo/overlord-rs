@@ -4,7 +4,7 @@ use alloy::{
     pubsub::PubSubFrontend,
 };
 use profito_rs::{
-    calculations::{percent_div, percent_mul, calculate_actual_debt_to_liquidate, calculate_user_balances},
+    calculations::{percent_div, percent_mul, calculate_actual_debt_to_liquidate, calculate_user_balances, get_reserves_list, get_reserves_data},
     constants::{
         AAVE_ORACLE_ADDRESS, AAVE_V3_POOL_ADDRESS, AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS,
         AAVE_V3_PROVIDER_ADDRESS, AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, UNISWAP_V3_FACTORY, WETH,
@@ -389,42 +389,6 @@ fn print_debt_collateral_title(
         "\t{}/{}) {} (debt) -> {} (collateral):",
         current_count, total_combinations, borrowed_symbol, supplied_symbol
     );
-}
-
-async fn get_reserves_list(provider: Arc<RootProvider<PubSubFrontend>>) -> Vec<Address> {
-    /*
-       According to https://github.com/aave-dao/aave-v3-origin/blob/a0512f8354e97844a3ed819cf4a9a663115b8e20/src/contracts/protocol/pool/Pool.sol#L532
-       the reserves list is ordered the same way as the _reserveList storage in the Pool contract.
-    */
-    match AaveV3Pool::new(AAVE_V3_POOL_ADDRESS, provider.clone())
-        .getReservesList()
-        .call()
-        .await
-    {
-        Ok(reserves_list) => reserves_list._0,
-        Err(e) => {
-            eprintln!("Error trying to call getReservesList: {}", e);
-            return Vec::new();
-        }
-    }
-}
-
-async fn get_reserves_data(provider: Arc<RootProvider<PubSubFrontend>>) -> Vec<AggregatedReserveData> {
-    /*
-       According to https://github.com/aave-dao/aave-v3-origin/blob/a0512f8354e97844a3ed819cf4a9a663115b8e20/src/contracts/helpers/UiPoolDataProviderV3.sol#L45
-       the reserves data is ordered the same way as the reserves list (it actually calls pool.getReservesList() and uses it as index)
-    */
-    match AaveUIPoolDataProvider::new(AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, provider.clone())
-        .getReservesData(AAVE_V3_PROVIDER_ADDRESS)
-        .call()
-        .await
-    {
-        Ok(reserves_list) => reserves_list._0,
-        Err(e) => {
-            eprintln!("Error trying to call getReservesData: {}", e);
-            return Vec::new();
-        }
-    }
 }
 
 async fn get_asset_price(provider: Arc<RootProvider<PubSubFrontend>>, asset: Address) -> U256 {
@@ -835,8 +799,8 @@ async fn main() {
     // `reserves_data` is Vec<AggregatedReserveData> and holds information about reserves in general,
     // while `user_reserves_data` holds information about a particular user's reserves
     // they're not the same
-    let reserves_list = get_reserves_list(provider.clone()).await;
-    let reserves_data = get_reserves_data(provider.clone()).await;
+    let reserves_list = get_reserves_list(provider.clone()).await.unwrap();
+    let reserves_data = get_reserves_data(provider.clone()).await.unwrap();
 
     // Calculate user account data
     let (total_collateral_in_base_currency, total_debt_in_base_currency, health_factor_v33) =
