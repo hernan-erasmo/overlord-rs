@@ -80,9 +80,20 @@ impl PriceCache {
     pub async fn get_price(
         &mut self,
         reserve: Address,
-        trace_id: String,
+        trace_id: Option<String>,
         oracle: AaveOracle::AaveOracleInstance<PubSubFrontend, Arc<RootProvider<PubSubFrontend>>>,
     ) -> Result<U256, Box<dyn std::error::Error + Send + Sync>> {
+        if trace_id.is_none() {
+            // This means the caller wants the actual price, not an overriden one
+            // the caller is probably bpchecker, so we don't care about caching the price
+            return match oracle.getAssetPrice(reserve).call().await {
+                Ok(price_response) => Ok(price_response._0),
+                Err(e) => Err(format!("Couldn't fetch price for {}: {}", reserve, e).into()),
+            };
+        }
+
+        let trace_id = trace_id.expect("trace_id should be Some - checked above");
+
         // Check if there are overrides for this price
         if let Some(prices) = self.prices.get(&trace_id) {
             // If there are overrides, and the price is present, return it
