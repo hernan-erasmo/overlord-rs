@@ -36,17 +36,17 @@ impl PriceCache {
         trace_id: String,
         new_prices_by_asset: Vec<(Address, String, U256)>,
     ) -> bool {
-        // This should only happen on initial vega-rs runs. No prices to update.
-        if new_prices_by_asset.is_empty() {
+        // Since we receive a list of candidates, each of them will try to override
+        // the price for the same asset. If an override is already present for a trace,
+        // then just ignore the new override and return quickly.
+        // This check is placed first, because it will be hit many more times than
+        // the emptyness of new_prices_by_asset (which comes next)
+        if self.overriden_traces.contains(&trace_id) {
             return true;
         }
 
-        // Now that override_price is called _before_ processing candidates, it should never
-        // happen that we already have a trace present in the cache.  I don't want to kill the program
-        // in this case, so I'm returning true as if nothing happened. But I'm logging an error nonetheless
-        // because this would be a most curious occurrence.
-        if self.overriden_traces.contains(&trace_id) {
-            error!("trace_id {} was present in the price cache", trace_id);
+        // This should only happen on initial vega-rs runs. No prices to update.
+        if new_prices_by_asset.is_empty() {
             return true;
         }
 

@@ -467,6 +467,7 @@ async fn get_best_liquidation_opportunity(
                     collateral_asset: supplied_reserve.underlyingAsset,
                     debt_asset: borrowed_reserve.underlyingAsset,
                     net_profit,
+                    printable_net_profit: String::from(""), // we don't use printable_net_profit here
                     actual_collateral_to_liquidate,
                     actual_debt_to_liquidate,
                     liquidation_protocol_fee_amount,

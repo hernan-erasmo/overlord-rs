@@ -103,7 +103,7 @@ async fn process_uw_event(
             "opportunity analysis for {} @ {}: highest profit before TX fees ${} - ({:?})",
             uw_event.address,
             uw_event.trace_id.clone(),
-            best_pair.net_profit,
+            best_pair.printable_net_profit,
             process_uw_event_timer.elapsed(),
         );
     } else {

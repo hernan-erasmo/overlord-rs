@@ -1,6 +1,6 @@
 use crate::constants::{AAVE_ORACLE_ADDRESS, AAVE_V3_POOL_ADDRESS, AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS, AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, AAVE_V3_PROVIDER_ADDRESS, UNISWAP_V3_FACTORY, UNISWAP_V3_QUOTER};
 use alloy::{
-    primitives::{Address, U256},
+    primitives::{Address, U256, utils::format_units},
     providers::{Provider, RootProvider},
     pubsub::PubSubFrontend,
 };
@@ -20,6 +20,7 @@ pub struct BestPair {
     pub collateral_asset: Address,
     pub debt_asset: Address,
     pub net_profit: U256,
+    pub printable_net_profit: String,
     pub actual_collateral_to_liquidate: U256,
     pub actual_debt_to_liquidate: U256,
     pub liquidation_protocol_fee_amount: U256,
@@ -618,11 +619,16 @@ pub async fn get_best_liquidation_opportunity(
             // TODO(Hernan): do we need to make sure this doesn't bite us in the ass?
             // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L320-L344
 
+            let printable_net_profit = format_units(
+                net_profit * collateral_asset_price,
+                8 + u8::try_from(collateral_reserve.decimals).unwrap_or(18)
+            ).unwrap_or_else(|_| "CONVERSION_ERROR".to_string());
             if net_profit > best_pair.as_ref().map_or(U256::ZERO, |p| p.net_profit) {
                 best_pair = Some(BestPair {
                     collateral_asset: supplied_reserve.underlyingAsset,
                     debt_asset: borrowed_reserve.underlyingAsset,
                     net_profit,
+                    printable_net_profit,
                     actual_collateral_to_liquidate,
                     actual_debt_to_liquidate,
                     liquidation_protocol_fee_amount,
