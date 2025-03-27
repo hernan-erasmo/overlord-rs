@@ -7,7 +7,10 @@
 # (unless you're debugging something or know what you're doing)
 #
 # Available args:
-# --ignore-temp-input: Clear the temporary input directory without prompting
+# --ignore-temp-input: Clear the temporary input directory without prompting.
+#       This temp input dir contains process pids used on a tidy shutdown. You
+#       shouldn't really be passing this flag unless you're debugging, or are
+#       absolutely positive no overlord process is live.
 # --ignore-temp-output: Clear the temporary output directory without prompting
 #
 ########################################################################
