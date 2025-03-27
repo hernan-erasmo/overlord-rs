@@ -214,7 +214,12 @@ async fn calculate_available_collateral_to_liquidate(
     // uniswap v3 fees are represented as hundredths of basis points: 1% == 100; 0,3% == 30; 0,05% == 5; 0,01% == 1
     let swap_loss_factor = U256::from(100);
     let swap_total_cost = percent_mul(collateral_amount, swap_loss_factor);
-    let net_profit = base_profit - execution_gas_cost - swap_total_cost;
+    let total_cost = execution_gas_cost + swap_total_cost;
+    let net_profit = if total_cost > base_profit {
+        U256::MIN
+    } else {
+        base_profit - total_cost
+    };
     println!("\t\tv3.3 profit calculation:");
     println!(
         "\t\t\tbase profit = abs(collateral amount - debt in collateral units) = abs({} - {}) = {} ($ {})",
@@ -263,7 +268,7 @@ async fn get_uniswap_v3_pools(
         let pool_address = match factory.getPool(token_a, token_b, fee).call().await {
             Ok(response) => response._0,
             Err(e) => {
-                println!("Error fetching pool: {}", e);
+                println!("(Error fetching pool: {})", e);
                 Address::ZERO
             }
         };
@@ -271,7 +276,7 @@ async fn get_uniswap_v3_pools(
         let in_range_liquidity = match pool.liquidity().call().await {
             Ok(response) => response._0,
             Err(e) => {
-                println!("Error fetching pool liquidity: {}", e);
+                println!("(Error fetching pool liquidity: {})", e);
                 0
             }
         };
@@ -309,19 +314,31 @@ async fn calculate_best_swap_fees(
         }
         best_fees.0 = collateral_pools[0].1;
     } else {
+        // If collateral is WETH, foxdie won't swap this leg because we're already where we want
+        // (that is, holding WETH balance and right before swapping that WETH for debt asset to repay loan)
+        // so it'll ignore whatever we send as COLLATERAL_TO_WETH_FEE
+        best_fees.0 = U24::from(0);
         println!("\t\tCollateral is WETH, no need to swap this leg");
     }
 
     // Get WETH -> debt pools
-    let debt_pools = get_uniswap_v3_pools(&provider, WETH, debt_asset).await;
-    println!("\t\tFound {} WETH/debt pools:", debt_pools.len());
-    for (addr, fee, in_range_liquidity) in &debt_pools {
-        println!(
-            "\t\t- Liquidity {} with {}hbps fee at pool {}",
-            in_range_liquidity, fee, addr
-        );
+    if debt_asset != WETH {
+        let debt_pools = get_uniswap_v3_pools(&provider, WETH, debt_asset).await;
+        println!("\t\tFound {} WETH/debt pools:", debt_pools.len());
+        for (addr, fee, in_range_liquidity) in &debt_pools {
+            println!(
+                "\t\t- Liquidity {} with {}hbps fee at pool {}",
+                in_range_liquidity, fee, addr
+            );
+        }
+        best_fees.1 = debt_pools[0].1;
+    } else {
+        // Since foxdie swaps collateral for WETH irregardles of what the debt asset is, if it happens to be WETH
+        // we're already where we want (that is, holding WETH after foxide swapped collateral for it, and right before
+        // repaying the loan which, in this case, was WETH). Foxdie will ignore whatever we send as WETH_TO_DEBT_FEE
+        best_fees.1 = U24::from(0);
+        println!("\t\tDebt is WETH, no need to swap this leg");
     }
-    best_fees.1 = debt_pools[0].1;
 
     // TODO: Calculate best fees based on liquidity and price impact
 
@@ -684,7 +701,7 @@ async fn main() {
             weth_to_debt_fee.to_string()
         );
         println!("export BUILDER_BRIBE={} && \\", "0"); // TODO
-        println!("forge test --match-test testLiquidation -vvvvv");
+        println!("forge test --match-test testLiquidation -vvvvv --gas-report");
         println!("\n");
     }
 }
