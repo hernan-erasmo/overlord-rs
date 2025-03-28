@@ -76,8 +76,9 @@ pub fn calculate_actual_debt_to_liquidate(
     }
 
     // in solidity, there's a check that verifies if what the user send as debtToCover on the liquidationCall
-    // is higher than this and, if it is, then it uses this value instead. We don't care about that because we'll
-    // always want to liquidate as much as possible.
+    // is higher than this and, if it is, then it uses this value instead.
+    // We can't check for that here because we're working the other way around (that is, we first do the calculations
+    // and THEN we determine the inputs to the liquidationCall)
     max_liquidatable_debt
 }
 
