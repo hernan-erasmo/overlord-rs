@@ -168,11 +168,7 @@ async fn calculate_available_collateral_to_liquidate(
 
     if max_collateral_to_liquidate > user_collateral_balance {
         collateral_amount = user_collateral_balance;
-        debt_amount_needed = (collateral_asset_price * collateral_amount * debt_asset_unit)
-            / percent_div(
-                debt_asset_price * collateral_asset_unit,
-                liquidation_bonus,
-            )
+        debt_amount_needed = percent_div((collateral_asset_price * collateral_amount * debt_asset_unit) / (debt_asset_price * collateral_asset_unit), liquidation_bonus);
     } else {
         collateral_amount = max_collateral_to_liquidate;
         debt_amount_needed = debt_to_cover;
