@@ -515,7 +515,7 @@ async fn calculate_available_collateral_to_liquidate(
         debt_amount_needed,
         liquidation_protocol_fee,
         collateral_to_liquidate_in_base_currency,
-        net_profit,
+        (net_profit * collateral_asset_price) / collateral_asset_unit,
     ))
 }
 
@@ -599,6 +599,9 @@ pub async fn get_best_liquidation_opportunity(
                 actual_debt_to_liquidate,
                 liquidation_protocol_fee_amount,
                 collateral_to_liquidate_in_base_currency,
+                // net_profit comes denominated in base units,
+                // comparable across different assets:
+                //      (net_profit * collateral_asset_price) / collateral_asset_unit,
                 net_profit,
             ) = match calculate_available_collateral_to_liquidate(
                 provider.clone(),
@@ -626,8 +629,8 @@ pub async fn get_best_liquidation_opportunity(
             // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L320-L344
 
             let printable_net_profit = format_units(
-                net_profit * collateral_asset_price,
-                8 + u8::try_from(collateral_reserve.decimals).unwrap_or(18)
+                net_profit,
+                8
             ).unwrap_or_else(|_| "CONVERSION_ERROR".to_string());
             if net_profit > best_pair.as_ref().map_or(U256::ZERO, |p| p.net_profit) {
                 best_pair = Some(BestPair {

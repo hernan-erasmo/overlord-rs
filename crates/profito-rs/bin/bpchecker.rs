@@ -241,7 +241,7 @@ async fn calculate_available_collateral_to_liquidate(
         debt_amount_needed,
         liquidation_protocol_fee,
         collateral_to_liquidate_in_base_currency,
-        net_profit,
+        (net_profit * collateral_asset_price) / collateral_asset_unit,
     )
 }
 
@@ -453,6 +453,9 @@ async fn get_best_liquidation_opportunity(
                 actual_debt_to_liquidate,
                 liquidation_protocol_fee_amount,
                 collateral_to_liquidate_in_base_currency,
+                // net_profit comes denominated in base units,
+                // comparable across different assets:
+                //      (net_profit * collateral_asset_price) / collateral_asset_unit,
                 net_profit,
             ) = calculate_available_collateral_to_liquidate(
                 provider.clone(),
