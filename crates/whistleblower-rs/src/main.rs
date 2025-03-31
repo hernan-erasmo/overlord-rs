@@ -78,7 +78,10 @@ impl EventProcessor for LiquidationCallProcessor {
             ..
         } = decoded.inner.data;
 
+        let emitter = decoded.address();
+
         info!(
+            emitter = %emitter,
             block = ?block_number,
             collateral_asset = %collateralAsset,
             debt_asset = %debtAsset,
