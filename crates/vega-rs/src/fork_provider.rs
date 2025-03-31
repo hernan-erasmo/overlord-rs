@@ -71,6 +71,7 @@ pub struct ForkProvider {
 
 impl Drop for ForkProvider {
     fn drop(&mut self) {
+        info!("Dropping ForkProvider");
         if let Err(e) = self._anvil_instance.child_mut().kill() {
             error!("Failed to kill AnvilInstance: {:?}", e);
         }
@@ -119,6 +120,8 @@ impl ForkProvider {
         };
         let block_number_to_be_forked = block_to_be_forked.header.number;
         // Step 2: Spin up the anvil fork at the given block
+        // Any error raised after this line must properly close the anvil process
+        // or it will become a zombie
         let fork_path = format!("./fork_{}.ipc", hex::encode(Uuid::new_v4().as_bytes()));
         let ipc_fork_file = Arc::new(IpcForkFile::new(fork_path.clone()));
         let result = panic::catch_unwind(|| {
