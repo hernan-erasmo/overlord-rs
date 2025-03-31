@@ -103,7 +103,7 @@ async fn process_uw_event(
             uw_event.address,
             uw_event.trace_id.clone(),
             best_pair.printable_net_profit,
-            "placeholder",
+            uw_event.total_collateral_base,
         );
     } else {
         warn!(
