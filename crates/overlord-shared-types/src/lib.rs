@@ -17,6 +17,7 @@ sol!(
 pub struct UnderwaterUserEvent {
     pub address: Address,
     pub trace_id: String,
+    pub total_collateral_base: U256,
     pub user_account_data: AaveV3Pool::getUserAccountDataReturn,
     pub new_asset_prices: Vec<(Address, String, U256)>,
 }

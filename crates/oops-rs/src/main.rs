@@ -191,6 +191,34 @@ fn _setup_logging() {
         .init();
 }
 
+fn get_slot_information() -> (f32, f32) {
+    const SLOT_DURATION: f32 = 12.0;
+
+    // Get current time with subsecond precision
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap();
+
+    // Convert to total seconds and nanoseconds
+    let total_seconds = now.as_secs();
+    let nanos = now.subsec_nanos() as f32 / 1_000_000_000.0;
+
+    // Get seconds within the current minute and add nanoseconds
+    let seconds_in_minute = (total_seconds % 60) as f32 + nanos;
+
+    // Calculate seconds within the current slot
+    let captured_at = seconds_in_minute % SLOT_DURATION;
+
+    // Calculate remaining time in slot
+    let remaining = SLOT_DURATION - captured_at;
+
+    // Round to 1 decimal place
+    let captured_at = (captured_at * 10.0).round() / 10.0;
+    let remaining = (remaining * 10.0).round() / 10.0;
+
+    (captured_at, remaining)
+}
+
 #[tokio::main]
 async fn main() {
     _setup_logging();
@@ -312,6 +340,7 @@ async fn main() {
                         trace_id = %bundle.trace_id,
                         expected_block = %expected_block,
                         tx_hash = %format!("{:?}", tx_hash),
+                        slot_info = %format!("{:?}", get_slot_information()),
                     );
                 }
                 match vega_socket.disconnect(VEGA_INBOUND_ENDPOINT) {

@@ -65,11 +65,12 @@ pub async fn get_hf_for_users(
                 let result = pool.getUserAccountData(address).call().await;
                 match result {
                     Ok(data) => {
-                        if data.healthFactor < U256::from(HF_MIN_THRESHOLD) {
+                        if data.healthFactor < U256::from(HF_MIN_THRESHOLD) && data.totalCollateralBase > U256::from(1e9) {
                             if let Some(bus) = &event_bus {
                                 bus.send(UnderwaterUserEvent {
                                     address,
                                     trace_id: trace_id.clone(),
+                                    total_collateral_base: data.totalCollateralBase,
                                     user_account_data: data.clone(),
                                     new_asset_prices: new_prices_by_asset.clone(),
                                 });
