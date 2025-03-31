@@ -36,7 +36,6 @@ async fn process_uw_event(
     provider_cache: Arc<ProviderCache>,
     price_cache: Arc<tokio::sync::Mutex<PriceCache>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let process_uw_event_timer = Instant::now();
     let provider = match provider_cache.get_provider().await {
         Ok(provider) => provider,
         Err(e) => {
@@ -100,11 +99,11 @@ async fn process_uw_event(
     .await
     {
         info!(
-            "opportunity analysis for {} @ {}: highest profit before TX fees ${} - ({:?})",
+            "liquidate {} @ {} for ${} (total collateral {})",
             uw_event.address,
             uw_event.trace_id.clone(),
             best_pair.printable_net_profit,
-            process_uw_event_timer.elapsed(),
+            "placeholder",
         );
     } else {
         warn!(
