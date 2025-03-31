@@ -122,7 +122,12 @@ impl ForkProvider {
         // Step 2: Spin up the anvil fork at the given block
         // Any error raised after this line must properly close the anvil process
         // or it will become a zombie
-        let fork_path = format!("./fork_{}.ipc", hex::encode(Uuid::new_v4().as_bytes()));
+        let fork_path = format!(
+            "./fork_{}.ipc",
+            bundle
+            .map(|b| b.trace_id.to_string())
+            .unwrap_or_else(|| "UNWRAP_ERROR".to_string())
+        );
         let ipc_fork_file = Arc::new(IpcForkFile::new(fork_path.clone()));
         let result = panic::catch_unwind(|| {
             Anvil::new()
