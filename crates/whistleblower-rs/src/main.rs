@@ -1,6 +1,6 @@
 use alloy::rpc::types::{Filter, Log};
 use alloy::{
-    primitives::{FixedBytes, U64},
+    primitives::{address, FixedBytes, U64},
     providers::{IpcConnect, Provider, ProviderBuilder, RootProvider},
     pubsub::{PubSubFrontend, Subscription},
     sol,
@@ -78,10 +78,8 @@ impl EventProcessor for LiquidationCallProcessor {
             ..
         } = decoded.inner.data;
 
-        let emitter = decoded.address();
-
         info!(
-            emitter = %emitter,
+            liquidator = ?liquidator,
             block = ?block_number,
             collateral_asset = %collateralAsset,
             debt_asset = %debtAsset,
@@ -280,6 +278,9 @@ async fn setup_subscription(
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     _setup_logging();
 
+    #[allow(non_snake_case)]
+    let AAVE_V3_POOL_ADDRESS = address!("87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2");
+
     info!("Starting whistleblower-rs");
     let vega_context = zmq::Context::new();
     let vega_socket = vega_context.socket(zmq::PUSH).unwrap_or_else(|e| {
@@ -344,6 +345,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         while let Some(log) = all_event_streams.next().await {
             let block_number = U64::from(log.block_number.unwrap_or_default());
             if let Some(event_signature) = log.topics().first() {
+                if log.address() != AAVE_V3_POOL_ADDRESS {
+                    continue;
+                }
                 if let Some(event_processor) = event_processors.get(event_signature) {
                     match event_processor.process(&log, block_number) {
                         Ok(event_details) => {
