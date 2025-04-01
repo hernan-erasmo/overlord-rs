@@ -1,6 +1,6 @@
-use crate::constants::{AAVE_ORACLE_ADDRESS, AAVE_V3_POOL_ADDRESS, AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS, AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, AAVE_V3_PROVIDER_ADDRESS, UNISWAP_V3_FACTORY, UNISWAP_V3_QUOTER};
+use crate::constants::{AAVE_ORACLE_ADDRESS, AAVE_V3_POOL_ADDRESS, AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS, AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, AAVE_V3_PROVIDER_ADDRESS, UNISWAP_V3_FACTORY, WETH};
 use alloy::{
-    primitives::{Address, U256, utils::format_units},
+    primitives::{aliases::U24, Address, U256, utils::format_units},
     providers::{Provider, RootProvider},
     pubsub::PubSubFrontend,
 };
@@ -10,7 +10,7 @@ use super::{
     cache::PriceCache,
     sol_bindings::{
         AaveOracle, IUiPoolDataProviderV3::{AggregatedReserveData, UserReserveData},
-        IAToken, ERC20, pool::AaveV3Pool, AaveUIPoolDataProvider, AaveProtocolDataProvider,
+        IAToken, ERC20, pool::AaveV3Pool, AaveUIPoolDataProvider, AaveProtocolDataProvider, UniswapV3Pool, UniswapV3Factory
     }
 };
 use tracing::warn;
@@ -416,6 +416,101 @@ pub async fn calculate_user_account_data(
         total_debt_in_base_currency,
         health_factor)
     )
+}
+
+/// Returns pools, fees and liquidity sorted by liquidity descending
+async fn get_uniswap_v3_pools(
+    provider: &RootProvider<PubSubFrontend>,
+    token_a: Address,
+    token_b: Address,
+) -> Vec<(Address, U24, u128)> {
+    let factory = UniswapV3Factory::new(UNISWAP_V3_FACTORY, provider.clone());
+    let fee_tiers = [
+        U24::from(100),
+        U24::from(500),
+        U24::from(3000),
+        U24::from(10000),
+    ]; // 0.01%, 0.05%, 0.3%, 1%
+    let mut pools = Vec::new();
+
+    for &fee in &fee_tiers {
+        let pool_address = match factory.getPool(token_a, token_b, fee).call().await {
+            Ok(response) => response._0,
+            Err(e) => {
+                println!("(Error fetching pool: {})", e);
+                Address::ZERO
+            }
+        };
+        let pool = UniswapV3Pool::new(pool_address, provider.clone());
+        let in_range_liquidity = match pool.liquidity().call().await {
+            Ok(response) => response._0,
+            Err(e) => {
+                println!("(Error fetching pool liquidity: {})", e);
+                0
+            }
+        };
+        if pool_address != Address::ZERO {
+            pools.push((pool_address, fee, in_range_liquidity));
+        }
+    }
+
+    pools.sort_by(|a, b| b.2.cmp(&a.2));
+    pools
+}
+
+/// UniswapV3 fees are hundredths of basis points: 1% == 10000; 0,3% == 3000; 0,05% == 500; 0,01% == 100
+/// Calculate and return the lowest fee tier for which there's enough liquidity
+pub async fn calculate_best_swap_fees(
+    provider: Arc<RootProvider<PubSubFrontend>>,
+    collateral_asset: Address,
+    debt_asset: Address,
+) -> (U24, U24) {
+    // collateral to weth, weth to debt
+    let mut best_fees = (U24::from(10000), U24::from(10000));
+
+    // Get collateral -> WETH pools
+    if collateral_asset != WETH {
+        let collateral_pools = get_uniswap_v3_pools(&provider, collateral_asset, WETH).await;
+        println!(
+            "\t\tFound {} collateral/WETH pools:",
+            collateral_pools.len()
+        );
+        for (addr, fee, in_range_liquidity) in &collateral_pools {
+            println!(
+                "\t\t- Liquidity {} with {}hbps fee at pool {}",
+                in_range_liquidity, fee, addr
+            );
+        }
+        best_fees.0 = collateral_pools[0].1;
+    } else {
+        // If collateral is WETH, foxdie won't swap this leg because we're already where we want
+        // (that is, holding WETH balance and right before swapping that WETH for debt asset to repay loan)
+        // so it'll ignore whatever we send as COLLATERAL_TO_WETH_FEE
+        best_fees.0 = U24::from(0);
+        println!("\t\tCollateral is WETH, no need to swap this leg");
+    }
+
+    // Get WETH -> debt pools
+    if debt_asset != WETH {
+        let debt_pools = get_uniswap_v3_pools(&provider, WETH, debt_asset).await;
+        println!("\t\tFound {} WETH/debt pools:", debt_pools.len());
+        for (addr, fee, in_range_liquidity) in &debt_pools {
+            println!(
+                "\t\t- Liquidity {} with {}hbps fee at pool {}",
+                in_range_liquidity, fee, addr
+            );
+        }
+        best_fees.1 = debt_pools[0].1;
+    } else {
+        // Since foxdie swaps collateral for WETH irregardles of what the debt asset is, if it happens to be WETH
+        // we're already where we want (that is, holding WETH after foxide swapped collateral for it, and right before
+        // repaying the loan which, in this case, was WETH). Foxdie will ignore whatever we send as WETH_TO_DEBT_FEE
+        best_fees.1 = U24::from(0);
+        println!("\t\tDebt is WETH, no need to swap this leg");
+    }
+
+    // TODO: Calculate best fees based on liquidity and price impact
+    best_fees
 }
 
 /// This function is supposed to be the EXACT SAME copy of the one defined
