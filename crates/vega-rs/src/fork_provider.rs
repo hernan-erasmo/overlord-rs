@@ -1,6 +1,5 @@
 use alloy::{
     eips::BlockNumberOrTag,
-    hex,
     network::TransactionBuilder,
     node_bindings::anvil::{Anvil, AnvilInstance},
     providers::{IpcConnect, Provider, ProviderBuilder, RootProvider},
@@ -10,7 +9,6 @@ use eyre::Result;
 use overlord_shared_types::PriceUpdateBundle;
 use std::{fs::File, panic, sync::Arc};
 use tracing::{error, info, warn};
-use uuid::Uuid;
 
 ////////////////////////////////////////////////////
 //
@@ -72,16 +70,22 @@ pub struct ForkProvider {
 impl Drop for ForkProvider {
     fn drop(&mut self) {
         info!("Dropping ForkProvider");
-        if let Err(e) = self._anvil_instance.child_mut().kill() {
-            error!("Failed to kill AnvilInstance: {:?}", e);
-        }
-        if let Err(e) = self._anvil_instance.child_mut().wait() {
-            error!("Failed to wait for AnvilInstance to terminate: {:?}", e);
-        }
+        Self::cleanup_anvil_instance(&mut self._anvil_instance);
     }
 }
 
 impl ForkProvider {
+    fn cleanup_anvil_instance(anvil: &mut AnvilInstance) {
+        info!("Cleaning up anvil instance");
+        if let Err(e) = anvil.child_mut().kill() {
+            error!("Failed to kill AnvilInstance: {:?}", e);
+        }
+        if let Err(e) = anvil.child_mut().wait() {
+            error!("Failed to wait for AnvilInstance to terminate: {:?}", e);
+        }
+        info!("Anvil instance killed");
+    }
+
     pub async fn new(bundle: Option<&PriceUpdateBundle>) -> Result<ForkProvider, String> {
         let (_anvil_instance, fork_provider, _fork_file) =
             ForkProvider::spin_up_fork(bundle).await?;
@@ -141,7 +145,7 @@ impl ForkProvider {
                 ])
                 .spawn()
         });
-        let anvil = match result {
+        let mut anvil = match result {
             Ok(anvil) => anvil,
             Err(e) => {
                 error!("Anvil creation panicked: {:?}", e);
@@ -158,6 +162,7 @@ impl ForkProvider {
             Ok(provider) => Ok(provider),
             Err(e) => {
                 error!("Failed to connect to fork IPC: {:?}", e);
+                Self::cleanup_anvil_instance(&mut anvil);
                 return Err("Failed to connect to fork IPC".to_string());
             }
         };
@@ -180,6 +185,7 @@ impl ForkProvider {
                 Ok(response) => response,
                 Err(e) => {
                     error!("Failed to send price update tx to fork: {:?}", e);
+                    Self::cleanup_anvil_instance(&mut anvil);
                     return Err("Failed to send price update tx to fork".to_string());
                 }
             };
@@ -188,6 +194,7 @@ impl ForkProvider {
                 Ok(receipt) => receipt,
                 Err(e) => {
                     error!("Failed to get receipt for price update tx: {:?}", e);
+                    Self::cleanup_anvil_instance(&mut anvil);
                     return Err("Failed to get receipt for price update tx".to_string());
                 }
             };
@@ -199,6 +206,7 @@ impl ForkProvider {
                         "Failed to get block number after applying price update tx: {:?}",
                         e
                     );
+                    Self::cleanup_anvil_instance(&mut anvil);
                     return Err(
                         "Failed to get block number after applying price update tx".to_string()
                     );
