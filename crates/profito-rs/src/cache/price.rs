@@ -8,7 +8,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     sync::Arc,
 };
-use tracing::{info, error};
+use tracing::info;
 
 #[derive(Debug, Clone)]
 pub struct PriceCache {
