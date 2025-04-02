@@ -391,6 +391,7 @@ impl UserReservesCache {
         let bundle_processing = Instant::now();
         let empty_response = (vec![vec![]], vec![]);
         if bundle.is_none() {
+            warn!("Empty bundle, can't draw candidates from this.");
             return empty_response;
         }
         let mut duplicate_candidates: Vec<UserAddress> = vec![];
@@ -398,6 +399,7 @@ impl UserReservesCache {
 
         let affected_reserves = self._calculate_affected_reserves(forwarded_to_address);
         if affected_reserves.is_empty() {
+            warn!("No affected reserves found for forwarded_to address {} (trace_id = {})", forwarded_to_address, bundle.unwrap().trace_id);
             return empty_response;
         }
 
@@ -434,6 +436,7 @@ impl UserReservesCache {
             // It can happen that some assets are affected by the price update (so this won't be caught by previous
             // early returns), but there are neither borrowers nor suppliers for them.
             // There's no need to continue processing over those.
+            warn!("No candidates found for affected reserves {:?} (forwarded_to {}, trace_id = {})", affected_reserves, forwarded_to_address, bundle.unwrap().trace_id);
             return empty_response;
         }
 
