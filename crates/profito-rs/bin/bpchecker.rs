@@ -85,15 +85,11 @@ async fn calculate_available_collateral_to_liquidate(
     collateral_asset_unit: U256,
     debt_asset_price: U256,
     debt_asset_unit: U256,
-    mut debt_to_cover: U256,
+    debt_to_cover: U256,
     user_collateral_balance: U256,
     liquidation_bonus: U256,
 ) -> (U256, U256, U256, U256, U256) {
     // https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L633
-    let mut collateral_amount = U256::ZERO;
-    let mut debt_amount_needed = U256::ZERO;
-    let mut liquidation_protocol_fee = U256::ZERO;
-    let mut collateral_to_liquidate_in_base_currency = U256::ZERO;
 
     let protocol =
         AaveProtocolDataProvider::new(AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS, provider.clone());
@@ -112,6 +108,8 @@ async fn calculate_available_collateral_to_liquidate(
         / (collateral_asset_price * debt_asset_unit);
     let max_collateral_to_liquidate = percent_mul(base_collateral, liquidation_bonus);
 
+    let mut collateral_amount: U256;
+    let debt_amount_needed: U256;
     if max_collateral_to_liquidate > user_collateral_balance {
         collateral_amount = user_collateral_balance;
         debt_amount_needed = percent_div((collateral_asset_price * collateral_amount * debt_asset_unit) / (debt_asset_price * collateral_asset_unit), liquidation_bonus);
@@ -124,6 +122,8 @@ async fn calculate_available_collateral_to_liquidate(
         max_collateral_to_liquidate
     );
 
+    let collateral_to_liquidate_in_base_currency: U256;
+    let mut liquidation_protocol_fee = U256::ZERO;
     collateral_to_liquidate_in_base_currency =
         (collateral_amount * collateral_asset_price) / collateral_asset_unit;
     if liquidation_protocol_fee_percentage != U256::ZERO {

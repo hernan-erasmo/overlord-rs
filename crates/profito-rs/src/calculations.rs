@@ -524,22 +524,17 @@ pub async fn calculate_best_swap_fees(
 async fn calculate_available_collateral_to_liquidate(
     provider: Arc<RootProvider<PubSubFrontend>>,
     collateral_asset: Address,
-    collateral_decimals: U256,
     // all original args for this function under this line
     collateral_asset_price: U256,
     collateral_asset_unit: U256,
     debt_asset_price: U256,
     debt_asset_unit: U256,
-    mut debt_to_cover: U256,
+    debt_to_cover: U256,
     user_collateral_balance: U256,
     liquidation_bonus: U256,
-) -> Result<(U256, U256, U256, U256, U256), Box<dyn std::error::Error>> {
+) -> Result<(U256, U256, U256, U256), Box<dyn std::error::Error>> {
     // Implementation of
     // https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L633
-    let mut collateral_amount = U256::ZERO;
-    let mut debt_amount_needed = U256::ZERO;
-    let mut liquidation_protocol_fee = U256::ZERO;
-    let mut collateral_to_liquidate_in_base_currency = U256::ZERO;
 
     let protocol =
         AaveProtocolDataProvider::new(AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS, provider.clone());
@@ -555,6 +550,8 @@ async fn calculate_available_collateral_to_liquidate(
         / (collateral_asset_price * debt_asset_unit);
     let max_collateral_to_liquidate = percent_mul(base_collateral, liquidation_bonus);
 
+    let mut collateral_amount;
+    let debt_amount_needed;
     if max_collateral_to_liquidate > user_collateral_balance {
         collateral_amount = user_collateral_balance;
         debt_amount_needed = percent_div((collateral_asset_price * collateral_amount * debt_asset_unit) / (debt_asset_price * collateral_asset_unit), liquidation_bonus);
@@ -563,8 +560,7 @@ async fn calculate_available_collateral_to_liquidate(
         debt_amount_needed = debt_to_cover;
     }
 
-    collateral_to_liquidate_in_base_currency =
-        (collateral_amount * collateral_asset_price) / collateral_asset_unit;
+    let mut liquidation_protocol_fee = U256::ZERO;
     if liquidation_protocol_fee_percentage != U256::ZERO {
         let bonus_collateral =
             collateral_amount - percent_div(collateral_amount, liquidation_bonus);
@@ -609,9 +605,14 @@ async fn calculate_available_collateral_to_liquidate(
         collateral_amount,
         debt_amount_needed,
         liquidation_protocol_fee,
-        collateral_to_liquidate_in_base_currency,
         (net_profit * collateral_asset_price) / collateral_asset_unit,
     ))
+}
+
+/// Returns the appropriate bribe based on the amount earned
+pub fn calculate_bribe(reward_amount: U256) -> U256 {
+    // From 0 to 9999
+    return U256::from(2000); // 20%
 }
 
 /// Not exactly the same as the one from bpchecker
@@ -693,7 +694,6 @@ pub async fn get_best_liquidation_opportunity(
                 actual_collateral_to_liquidate,
                 actual_debt_to_liquidate,
                 liquidation_protocol_fee_amount,
-                collateral_to_liquidate_in_base_currency,
                 // net_profit comes denominated in base units,
                 // comparable across different assets:
                 //      (net_profit * collateral_asset_price) / collateral_asset_unit,
@@ -701,7 +701,6 @@ pub async fn get_best_liquidation_opportunity(
             ) = match calculate_available_collateral_to_liquidate(
                 provider.clone(),
                 collateral_reserve.underlyingAsset,
-                collateral_reserve.decimals,
                 collateral_asset_price,
                 collateral_asset_unit,
                 debt_asset_price,
