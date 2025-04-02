@@ -6,11 +6,11 @@ mod utils;
 
 use alloy::{providers::RootProvider, pubsub::PubSubFrontend};
 use cache::{PriceCache, ProviderCache};
-use calculations::{get_best_liquidation_opportunity, get_reserves_list, get_reserves_data, calculate_user_account_data};
+use calculations::{get_best_liquidation_opportunity, get_reserves_list, get_reserves_data, calculate_user_account_data, calculate_best_swap_fees, calculate_bribe};
 use constants::*;
 use overlord_shared_types::UnderwaterUserEvent;
 use sol_bindings::AaveOracle;
-use std::{sync::Arc, time::Instant};
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use tracing_appender::rolling::{self, Rotation};
@@ -98,6 +98,15 @@ async fn process_uw_event(
     )
     .await
     {
+
+        // these are not part of the profit calculation
+        // they're here only for the purpose of submitting the appropriate parameters
+        // to the liquidation function
+        let (collateral_to_weth_fee, weth_to_debt_fee) =
+            calculate_best_swap_fees(provider.clone(), best_pair.collateral_asset, best_pair.debt_asset)
+            .await;
+        let bribe = calculate_bribe(best_pair.net_profit);
+
         info!(
             "liquidate {} @ {} for ${} (total collateral {})",
             uw_event.address,
