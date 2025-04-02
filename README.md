@@ -14,7 +14,13 @@ After that, take a look at the `startup.sh` script for different ways of running
 
 ### We're missing liquidations because we don't see the triggering price update.
 
-Most likely reason is that `oops` is not tracking the address that's calling `forward()` on the `EACAggregator` contract. Follow these steps:
+Means `oops` didn't see the update, plain and simple. Now, knowing _why_ is the complicated part.
+
+First thing, make sure the block (or the block previous to the liquidation) had any `Forward` calls.
+
+Also, make sure `oops` didn't output any parsing errors around the time of the price update tx. That could signal a change in the way price updates are submitted.
+
+If nothing looks out of the ordinary, then we need to ask ourselves: Are we tracking the originator? `oops` works by listening to all pending tx's, filtering by those that come from specific addresses and then filtering again by those that call the `transmit()` function (wrapped in calldata from a `forward()` call). If the sender of the price update tx is not in our tracked list, we need to consider updating the addresses file. For that, you need to follow these steps:
 
 1. From the `nodebuster` repo, make sure the virtual environment is on (otherwise run `source ./bin/activate`)
 2. Run `python ./src/main.py --force`. This is the main script that will parse all our data sources and pull new information. The `--force` flag means it ignores whatever was cached on the previous run.
