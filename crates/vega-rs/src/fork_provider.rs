@@ -215,7 +215,6 @@ impl ForkProvider {
             info!(
                 trace_id = %bundle.trace_id,
                 block_number = %new_block_number,
-                receipt = ?tx_receipt,
                 "Applied bundle tx receipt"
             );
         }

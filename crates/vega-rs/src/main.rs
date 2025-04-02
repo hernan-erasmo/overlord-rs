@@ -53,7 +53,7 @@ async fn run_price_update_pipeline(
     let pipeline_processing = Instant::now();
     let (address_buckets, affected_reserves) = cache.get_candidates_for_bundle(bundle).await;
     if address_buckets.len() == 1 && address_buckets[0].is_empty() {
-        info!("Not processing bundle: {:?}", bundle);
+        info!("Not processing bundlef for trace_id {}", bundle.unwrap().trace_id);
         return;
     }
     let fork_provider = match ForkProvider::new(bundle).await {
