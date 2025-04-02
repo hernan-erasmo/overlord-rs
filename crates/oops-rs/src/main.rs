@@ -295,7 +295,16 @@ async fn main() {
                 while let Ok(tx_body) = rx_buffer.recv().await {
                     let tx_hash = tx_body.hash;
                     let tx_from = tx_body.from;
-                    if !allowed_addresses.contains(&tx_from) && !is_transmit_call(&tx_body) {
+                    if !is_transmit_call(&tx_body) {
+                        continue;
+                    }
+                    if !allowed_addresses.contains(&tx_from) {
+                        warn!(
+                            message = "Valid transmit() from non-tracked address",
+                            tx_from = %format!("{:?}", tx_from),
+                            tx_hash = %format!("{:?}", tx_hash),
+                            slot_info = %format!("{:?}", get_slot_information()),
+                        );
                         continue;
                     }
                     let (tx_new_price, forward_to) = match get_price_from_input(&tx_body.input) {
