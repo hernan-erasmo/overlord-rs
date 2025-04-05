@@ -3,6 +3,7 @@ use alloy::{
     providers::{IpcConnect, Provider, ProviderBuilder, RootProvider},
     pubsub::PubSubFrontend,
 };
+use ethers_core::types::{H256, transaction::eip2718::TypedTransaction};
 use profito_rs::cache::PriceCache;
 use profito_rs::{
     calculations::{
@@ -25,6 +26,7 @@ use profito_rs::{
         IUiPoolDataProviderV3::{AggregatedReserveData, UserReserveData},
     },
     utils::{ReserveConfigurationEnhancedData, generate_reserve_details_by_asset, get_user_reserves_data},
+    mev_share_service::MevShareService,
 };
 use std::{collections::HashMap, env, sync::Arc};
 use tokio::sync::Mutex;
@@ -351,11 +353,12 @@ async fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() <= 2 {
-        eprintln!("Usage: {} <address> [path_to_ipc]", args[0]);
+        eprintln!("Usage: {} <address> [path_to_ipc] [simulate_bundle]", args[0]);
         std::process::exit(1);
     }
 
     let ipc_path = args.get(2).map_or("/tmp/reth.ipc", |path| path.as_str());
+    let simulate_bundle = args.get(3).is_some();
 
     let user_address: Address = args[1].parse().expect("Invalid address format");
 
@@ -480,6 +483,8 @@ async fn main() {
         )
     }
 
+    let mut price_update_tx_hash = H256::zero();
+
     // Print number of possible combinations
     println!("\n### Liquidation path analysis ###");
 
@@ -535,10 +540,12 @@ async fn main() {
             std::env::var("PRICE_UPDATE_FROM")
                 .unwrap_or_else(|_| "Couldn't read PRICE_UPDATE_FROM from env".to_string())
         );
+        price_update_tx_hash = std::env::var("PRICE_UPDATE_TX")
+            .map(|hash| hash.parse::<H256>().unwrap())
+            .unwrap_or_else(|_| H256::zero());
         println!(
             "export PRICE_UPDATE_TX_HASH={} && \\",
-            std::env::var("PRICE_UPDATE_TX")
-                .unwrap_or_else(|_| "Couldn't read PRICE_UPDATE_TX from env".to_string())
+            price_update_tx_hash,
         );
         println!("export PRICE_UPDATE_BLOCK={} && \\", block_number - 1); // One less because forge will also replay the price update tx
         println!(
@@ -552,5 +559,16 @@ async fn main() {
         println!("export BUILDER_BRIBE={} && \\", "0"); // TODO
         println!("forge test --match-test testLiquidation -vvvvv --gas-report");
         println!("\n");
+    }
+
+    if simulate_bundle {
+        println!("\n### Simulating bundle execution with MevShare ###\n");
+        let mev_share_service = MevShareService::new();
+        mev_share_service.submit_simple_liquidation_bundle(
+            if price_update_tx_hash == H256::zero() { H256::random() } else { price_update_tx_hash },
+            TypedTransaction::Eip1559(Default::default()),
+            true,
+        ).await.unwrap();
+        println!("\n### End of simulation output ###\n");
     }
 }

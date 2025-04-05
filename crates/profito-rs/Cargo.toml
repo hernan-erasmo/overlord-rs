@@ -10,7 +10,7 @@ path = "bin/bpchecker.rs"
 [dependencies]
 alloy.workspace = true
 bincode.workspace = true
-ethers-core = "2.0.14"
+ethers-core.workspace = true
 ethers-signers = "2.0.14"
 jsonrpsee = "0.20"
 mev-share.workspace = true

@@ -72,6 +72,7 @@ impl MevShareService {
         &self,
         pub_tx: H256,
         foxdie_tx: TypedTransaction,
+        simulate: bool,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let signature = self.tx_signer.sign_transaction(&foxdie_tx.clone().into()).await?;
         let bytes = foxdie_tx.rlp_signed(&signature);
@@ -83,19 +84,16 @@ impl MevShareService {
             bundle_body, ..Default::default()
         };
 
-        /*
-            Uncomment when ready
-
-            // Send bundle
-            let client = &*self.get_client().await?;
-            let send_res = MevApiClient::send_bundle(client, bundle.clone()).await;
-            info!("Got a bundle response: {:?}", send_res);
-
-            // Simulate bundle
-            let sim_res = MevApiClient::sim_bundle(client, bundle.clone(), Default::default()).await;
-            info!("Got a simulation response: {:?}", sim_res);
-         */
-
+        let client = &*self.get_client().await?;
+        if simulate {
+            println!("Simulating bundle");
+            //let sim_res = MevApiClient::sim_bundle(client, bundle.clone(), Default::default()).await;
+            //info!("Got a simulation response: {:?}", sim_res);
+        } else {
+            println!("SENDING REAL BUNDLE");
+            //let send_res = MevApiClient::send_bundle(client, bundle.clone()).await;
+            //info!("Got a bundle response: {:?}", send_res);
+        }
         Ok(())
     }
 }
