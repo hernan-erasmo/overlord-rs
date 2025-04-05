@@ -1,13 +1,9 @@
 use alloy::{
-    hex,
-    primitives::{Address, Bytes, U256},
-    providers::{IpcConnect, Provider, ProviderBuilder},
-    rpc::{client::ClientBuilder, types::Transaction},
-    sol,
-    sol_types::SolCall,
+    hex, primitives::{Address, Bytes, U256}, providers::{IpcConnect, Provider, ProviderBuilder, RootProvider}, pubsub::{PubSubFrontend, Subscription}, rpc::{client::ClientBuilder, types::Transaction}, sol, sol_types::SolCall
 };
 use ethers_core::abi::{decode, ParamType};
-use mev_share_sse::Event as MevShareEvent;
+use mev_share_sse::{client::EventStream, Event as MevShareEvent, EventClient};
+use futures_util::{Stream, StreamExt};
 use overlord_shared_types::{MessageBundle, PriceUpdateBundle};
 use std::{
     error::Error,
@@ -41,10 +37,13 @@ sol!(
     ) external override;
 );
 
+const IPC_URL: &str = "/tmp/reth.ipc";
+const MEV_SHARE_MAINNET_SSE_URL: &str = "https://mev-share.flashbots.net";
 const SECONDS_BEFORE_RECONNECTION: u64 = 2;
 const PATH_TO_ADDRESSES_INPUT: &str = "crates/oops-rs/addresses.txt";
 const VEGA_INBOUND_ENDPOINT: &str = "ipc:///tmp/vega_inbound";
 
+#[derive(Clone)]
 enum PendingTxType {
     FromMempool(Transaction),
     FromMevShare(MevShareEvent),
@@ -225,6 +224,43 @@ fn get_slot_information() -> (f32, f32) {
     (captured_at, remaining)
 }
 
+/// Create a mempool stream to listen for pending transactions
+/// Returns the subscrition on which to await, and the provider to query the block number or whatever
+async fn create_mempool_stream() -> Result<(Subscription<Transaction>, RootProvider<PubSubFrontend>), Box<dyn Error>> {
+    let ipc = IpcConnect::new(IPC_URL.to_string());
+    let client = match ClientBuilder::default().ipc(ipc).await {
+        Ok(client) => {
+            client.set_channel_size(2048);
+            client
+        }
+        Err(e) => {
+            error!(
+                "Failed to connect to IPC: {e}. Retrying in {} seconds...",
+                SECONDS_BEFORE_RECONNECTION
+            );
+            sleep(Duration::from_secs(SECONDS_BEFORE_RECONNECTION)).await;
+            return Err(Box::new(e));
+        }
+    };
+    let provider = ProviderBuilder::new().on_client(client);
+    let stream = match provider.subscribe_full_pending_transactions().await {
+        Ok(stream) => stream,
+        Err(e) => return Err(Box::new(e))
+    };
+    Ok((stream, provider))
+}
+
+async fn create_mev_share_stream() -> Result<EventStream<mev_share_sse::Event>, Box<dyn Error>> {
+    let client = EventClient::default();
+    let stream = match client.events(MEV_SHARE_MAINNET_SSE_URL).await {
+        Ok(stream) => stream,
+        Err(e) => {
+            return Err(Box::new(e));
+        }
+    };
+    Ok(stream)
+}
+
 #[tokio::main]
 async fn main() {
     _setup_logging();
@@ -239,46 +275,64 @@ async fn main() {
 
     loop {
         // Outer loop to restart IPC on major connection issues
-        let ipc_url = "/tmp/reth.ipc";
-        let ipc = IpcConnect::new(ipc_url.to_string());
-        let client = match ClientBuilder::default().ipc(ipc).await {
-            Ok(client) => {
-                client.set_channel_size(2048);
-                client
-            }
-            Err(e) => {
-                error!(
-                    "Failed to connect to IPC: {e}. Retrying in {} seconds...",
-                    SECONDS_BEFORE_RECONNECTION
-                );
-                sleep(Duration::from_secs(SECONDS_BEFORE_RECONNECTION)).await;
-                continue;
-            }
-        };
-        let provider = ProviderBuilder::new().on_client(client);
-        let mut pending_tx_stream = match provider.subscribe_full_pending_transactions().await {
+        let (mut mempool_tx_stream, provider) = match create_mempool_stream().await {
             Ok(stream) => stream,
             Err(e) => {
                 error!(
-                    "Failed to subscribe to pending transactions: {e}. Retrying in {} seconds...",
+                    "Failed to subscribe to mempool transactions: {e}. Retrying in {} seconds...",
                     SECONDS_BEFORE_RECONNECTION
                 );
                 sleep(Duration::from_secs(SECONDS_BEFORE_RECONNECTION)).await;
                 continue;
             }
         };
-        let (tx_buffer, mut rx_buffer) = broadcast::channel::<Transaction>(1024);
-        let receiver_handle = tokio::spawn(async move {
+        let mut mev_share_tx_stream = match create_mev_share_stream().await {
+            Ok(stream) => stream,
+            Err(e) => {
+                error!(
+                    "Failed to create mev-share stream: {e}. Retrying in {} seconds...",
+                    SECONDS_BEFORE_RECONNECTION
+                );
+                sleep(Duration::from_secs(SECONDS_BEFORE_RECONNECTION)).await;
+                continue;
+            }
+        };
+
+        let (tx_buffer, mut rx_buffer) = broadcast::channel::<PendingTxType>(2048);
+        let tx_buffer_for_mempool = tx_buffer.clone();
+        let tx_buffer_for_mev_share = tx_buffer.clone();
+
+        let mempool_receiver_handle = tokio::spawn(async move {
             loop {
-                match pending_tx_stream.recv().await {
+                match mempool_tx_stream.recv().await {
                     Ok(tx_body) => {
-                        if let Err(e) = tx_buffer.send(tx_body) {
-                            error!("Failed to send tx to buffer: {e}");
+                        if let Err(e) = tx_buffer_for_mempool.send(PendingTxType::FromMempool(tx_body)) {
+                            error!("Failed to send tx to buffer from mempool receiver: {e}");
                             break;
                         }
                     }
                     Err(e) => {
-                        error!("Unknow stream enqueue error: {e}");
+                        error!("Unknow stream enqueue error on mempool receiver: {e}");
+                        break;
+                    }
+                }
+            }
+        });
+
+        let mev_share_receiver_handle = tokio::spawn(async move {
+            while let Some(event) = mev_share_tx_stream.next().await {
+                match event {
+                    Ok(event) => {
+                        if event.transactions.is_empty() {
+                            continue;
+                        };
+                        if let Err(e) = tx_buffer_for_mev_share.send(PendingTxType::FromMevShare(event)) {
+                            error!("Failed to send tx to buffer from mev-share receiver: {e}");
+                            break;
+                        };
+                    }
+                    Err(e) => {
+                        error!("Unknow stream enqueue error on mev-share receiver: {e}");
                         break;
                     }
                 }
@@ -299,64 +353,71 @@ async fn main() {
             }
             async move {
                 while let Ok(tx_body) = rx_buffer.recv().await {
-                    let tx_hash = tx_body.hash;
-                    let tx_from = tx_body.from;
-                    if !is_transmit_call(&tx_body) {
-                        continue;
+                    match tx_body {
+                        PendingTxType::FromMempool(tx_body) => {
+                            let tx_hash = tx_body.hash;
+                            let tx_from = tx_body.from;
+                            if !is_transmit_call(&tx_body) {
+                                continue;
+                            }
+                            if !allowed_addresses.contains(&tx_from) {
+                                warn!(
+                                    message = "Valid transmit() from non-tracked address",
+                                    tx_from = %format!("{:?}", tx_from),
+                                    tx_hash = %format!("{:?}", tx_hash),
+                                    slot_info = %format!("{:?}", get_slot_information()),
+                                );
+                                continue;
+                            }
+                            let (tx_new_price, forward_to) = match get_price_from_input(&tx_body.input) {
+                                Ok((price, to)) => (price, to),
+                                Err(e) => {
+                                    error!("INVALID PRICE UPDATE: failed to get price from input: {e}");
+                                    continue;
+                                }
+                            };
+                            let bundle = PriceUpdateBundle {
+                                trace_id: format!("{:?}", &tx_hash)[2..10].to_string(),
+                                tx_new_price,
+                                forward_to,
+                                tx_to: tx_body.to.expect("This tx didn't define a TO address"),
+                                tx_from,
+                                tx_input: tx_body.input,
+                            };
+                            let message_bundle = MessageBundle::PriceUpdate(bundle.clone());
+                            let serialized_bundle = match bincode::serialize(&message_bundle) {
+                                Ok(bundle) => bundle,
+                                Err(e) => {
+                                    error!("Failed to serialize message bundle: {e}");
+                                    continue;
+                                }
+                            };
+                            match vega_socket.send(&serialized_bundle, 0) {
+                                Ok(_) => (),
+                                Err(e) => {
+                                    error!("Failed to send bundle to Vega: {e}");
+                                    continue;
+                                }
+                            };
+                            let expected_block = match provider_clone.get_block_number().await {
+                                Ok(block) => block + 1,
+                                Err(e) => {
+                                    warn!("Failed to get block number: {e}");
+                                    u64::MIN
+                                }
+                            };
+                            info!(
+                                message = "MEMPOOL update sent.",
+                                trace_id = %bundle.trace_id,
+                                expected_block = %expected_block,
+                                tx_hash = %format!("{:?}", tx_hash),
+                                slot_info = %format!("{:?}", get_slot_information()),
+                            );
+                        }
+                        PendingTxType::FromMevShare(event) => {
+                            info!("Got a MEVSHARE update");
+                        }
                     }
-                    if !allowed_addresses.contains(&tx_from) {
-                        warn!(
-                            message = "Valid transmit() from non-tracked address",
-                            tx_from = %format!("{:?}", tx_from),
-                            tx_hash = %format!("{:?}", tx_hash),
-                            slot_info = %format!("{:?}", get_slot_information()),
-                        );
-                        continue;
-                    }
-                    let (tx_new_price, forward_to) = match get_price_from_input(&tx_body.input) {
-                        Ok((price, to)) => (price, to),
-                        Err(e) => {
-                            error!("INVALID PRICE UPDATE: failed to get price from input: {e}");
-                            continue;
-                        }
-                    };
-                    let bundle = PriceUpdateBundle {
-                        trace_id: format!("{:?}", &tx_hash)[2..10].to_string(),
-                        tx_new_price,
-                        forward_to,
-                        tx_to: tx_body.to.expect("This tx didn't define a TO address"),
-                        tx_from,
-                        tx_input: tx_body.input,
-                    };
-                    let message_bundle = MessageBundle::PriceUpdate(bundle.clone());
-                    let serialized_bundle = match bincode::serialize(&message_bundle) {
-                        Ok(bundle) => bundle,
-                        Err(e) => {
-                            error!("Failed to serialize message bundle: {e}");
-                            continue;
-                        }
-                    };
-                    match vega_socket.send(&serialized_bundle, 0) {
-                        Ok(_) => (),
-                        Err(e) => {
-                            error!("Failed to send bundle to Vega: {e}");
-                            continue;
-                        }
-                    };
-                    let expected_block = match provider_clone.get_block_number().await {
-                        Ok(block) => block + 1,
-                        Err(e) => {
-                            warn!("Failed to get block number: {e}");
-                            u64::MIN
-                        }
-                    };
-                    info!(
-                        message = "Price update sent to Vega",
-                        trace_id = %bundle.trace_id,
-                        expected_block = %expected_block,
-                        tx_hash = %format!("{:?}", tx_hash),
-                        slot_info = %format!("{:?}", get_slot_information()),
-                    );
                 }
                 match vega_socket.disconnect(VEGA_INBOUND_ENDPOINT) {
                     Ok(_) => (),
@@ -366,7 +427,8 @@ async fn main() {
         });
 
         tokio::select! {
-            _ = receiver_handle => error!("Receiver handle ended. This should NEVER happen during operation."),
+            _ = mempool_receiver_handle => error!("Mempool receiver handle ended. This should NEVER happen during operation."),
+            _ = mev_share_receiver_handle => error!("MevShare receiver handle ended. This should NEVER happen during operation."),
             _ = processor_handle => error!("Processor handle ended. This should NEVER happen during operation."),
         }
 
