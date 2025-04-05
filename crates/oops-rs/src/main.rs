@@ -7,6 +7,7 @@ use alloy::{
     sol_types::SolCall,
 };
 use ethers_core::abi::{decode, ParamType};
+use mev_share_sse::Event as MevShareEvent;
 use overlord_shared_types::{MessageBundle, PriceUpdateBundle};
 use std::{
     error::Error,
@@ -43,6 +44,11 @@ sol!(
 const SECONDS_BEFORE_RECONNECTION: u64 = 2;
 const PATH_TO_ADDRESSES_INPUT: &str = "crates/oops-rs/addresses.txt";
 const VEGA_INBOUND_ENDPOINT: &str = "ipc:///tmp/vega_inbound";
+
+enum PendingTxType {
+    FromMempool(Transaction),
+    FromMevShare(MevShareEvent),
+}
 
 /// Extract the new price from the input data of a transaction
 fn get_price_from_input(tx_input: &Bytes) -> Result<(U256, Address), Box<dyn Error>> {
