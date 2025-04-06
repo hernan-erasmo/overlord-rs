@@ -1,10 +1,11 @@
 use alloy::{
-    hex, primitives::{Address, Bytes, U256}, providers::{IpcConnect, Provider, ProviderBuilder, RootProvider}, pubsub::{PubSubFrontend, Subscription}, rpc::{client::ClientBuilder, types::Transaction}, sol, sol_types::SolCall
+    hex, primitives::{Address, Bytes, U256}, providers::{IpcConnect, Provider, ProviderBuilder, RootProvider}, pubsub::{PubSubFrontend, Subscription}, rpc::{client::ClientBuilder, types::{Transaction}}, sol, sol_types::SolCall
 };
 use ethers_core::abi::{decode, ParamType};
 use mev_share_sse::{client::EventStream, Event as MevShareEvent, EventClient};
-use futures_util::{Stream, StreamExt};
+use futures_util::StreamExt;
 use overlord_shared_types::{MessageBundle, PriceUpdateBundle};
+
 use std::{
     error::Error,
     fs::File,
@@ -35,6 +36,23 @@ sol!(
         bytes32[] calldata ss,
         bytes32 rawVs
     ) external override;
+
+    #[allow(missing_docs)]
+    function transmitSecondary(
+        bytes32[3] calldata reportContext,
+        bytes calldata report,
+        bytes32[] calldata rs,
+        bytes32[] calldata ss,
+        bytes32 rawVs
+    ) external override;
+
+    #[allow(missing_docs)]
+    #[allow(clippy::too_many_arguments)]
+    #[sol(rpc)]
+    contract ForwardToDestination {
+        function transmitters() external view returns (address[] memory);
+        function getTransmitters() external view returns (address[] memory);
+    }
 );
 
 const IPC_URL: &str = "/tmp/reth.ipc";
@@ -49,6 +67,31 @@ enum PendingTxType {
     FromMevShare(MevShareEvent),
 }
 
+fn is_transmit_secondary(calldata: Option<Bytes>) -> bool {
+    calldata.as_ref().map_or(false, |data| data.windows(4).any(|w| w == [0xba, 0x0c, 0xb2, 0x9e]))
+}
+
+async fn get_tx_sender_from_contract(
+    provider: RootProvider<PubSubFrontend>,
+    forward_to_contract: Address,
+) -> Result<Address, Box<dyn Error>> {
+    info!("Attempting to get transmitters from {:?}", forward_to_contract);
+    let forward_contract = ForwardToDestination::new(forward_to_contract, provider.clone());
+    let transmitters = match forward_contract.getTransmitters().call().await {
+        Ok(transmitters) => transmitters._0,
+        Err(_) => {
+            match forward_contract.transmitters().call().await {
+                Ok(transmitters) => transmitters._0,
+                Err(e) => return Err(format!("Failed call to getTransmitters() AND transmitters(): {e}").into())
+            }
+        }
+    };
+    if transmitters.is_empty() {
+        return Err("No transmitters found".into());
+    }
+    transmitters.first().cloned().ok_or_else(|| "No transmitters found".into())
+}
+
 /// Extract the new price from the input data of a transaction
 fn get_price_from_input(tx_input: &Bytes) -> Result<(U256, Address), Box<dyn Error>> {
     // get `data` from forward(address to, bytes calldata data)
@@ -58,12 +101,25 @@ fn get_price_from_input(tx_input: &Bytes) -> Result<(U256, Address), Box<dyn Err
     };
     let forward_data = forward_calldata.data;
 
-    // get `report` from transmit(bytes32[3] calldata reportContext, bytes calldata report, bytes32[] calldata rs, bytes32[] calldata ss, bytes32 rawVs)
+    // get `report` from
+    // transmit( or tansmitSecondary(
+    //   bytes32[3] calldata reportContext,
+    //   bytes calldata report,
+    //   bytes32[] calldata rs,
+    //   bytes32[] calldata ss,
+    //   bytes32 rawVs
+    // )
     let transmit_report = match transmitCall::abi_decode(&forward_data, false) {
         Ok(data) => data.report,
-        Err(e) => {
-            error!("Failed to decode transmit call: {e}");
-            return Err(Box::new(e));
+        Err(e1) => {
+            // If transmit fails, try transmitSecondary
+            match transmitSecondaryCall::abi_decode(&forward_data, false) {
+                Ok(data) => data.report,
+                Err(e2) => {
+                    error!("Failed to decode both transmit calls: \ntransmit: {e1}\ntransmitSecondary: {e2}");
+                    return Err(Box::new(e2));
+                }
+            }
         }
     };
 
@@ -362,7 +418,7 @@ async fn main() {
                             }
                             if !allowed_addresses.contains(&tx_from) {
                                 warn!(
-                                    message = "Valid transmit() from non-tracked address",
+                                    message = "Found mempool valid transmit() call from non-tracked address",
                                     tx_from = %format!("{:?}", tx_from),
                                     tx_hash = %format!("{:?}", tx_hash),
                                     slot_info = %format!("{:?}", get_slot_information()),
@@ -372,7 +428,7 @@ async fn main() {
                             let (tx_new_price, forward_to) = match get_price_from_input(&tx_body.input) {
                                 Ok((price, to)) => (price, to),
                                 Err(e) => {
-                                    error!("INVALID PRICE UPDATE: failed to get price from input: {e}");
+                                    error!("MEMPOOL INVALID PRICE UPDATE: failed to get price from input: {e}");
                                     continue;
                                 }
                             };
@@ -380,7 +436,7 @@ async fn main() {
                                 trace_id: format!("{:?}", &tx_hash)[2..10].to_string(),
                                 tx_new_price,
                                 forward_to,
-                                tx_to: tx_body.to.expect("This tx didn't define a TO address"),
+                                tx_to: tx_body.to.expect("This mempool tx didn't define a TO address"),
                                 tx_from,
                                 tx_input: tx_body.input,
                             };
@@ -388,21 +444,21 @@ async fn main() {
                             let serialized_bundle = match bincode::serialize(&message_bundle) {
                                 Ok(bundle) => bundle,
                                 Err(e) => {
-                                    error!("Failed to serialize message bundle: {e}");
+                                    error!("Failed to serialize mempool message bundle: {e}");
                                     continue;
                                 }
                             };
                             match vega_socket.send(&serialized_bundle, 0) {
                                 Ok(_) => (),
                                 Err(e) => {
-                                    error!("Failed to send bundle to Vega: {e}");
+                                    error!("Failed to send mempool bundle to Vega: {e}");
                                     continue;
                                 }
                             };
                             let expected_block = match provider_clone.get_block_number().await {
                                 Ok(block) => block + 1,
                                 Err(e) => {
-                                    warn!("Failed to get block number: {e}");
+                                    warn!("Failed to get mempool block number: {e}");
                                     u64::MIN
                                 }
                             };
@@ -415,7 +471,85 @@ async fn main() {
                             );
                         }
                         PendingTxType::FromMevShare(event) => {
-                            info!("Got a MEVSHARE update");
+                            for tx in event.transactions {
+                                if tx.to.is_none() { // MevShare tx doesn't define 'to' field. Nothing to do.
+                                    continue;
+                                };
+                                if let Some(forward_selector) = tx.function_selector {
+                                    if forward_selector == [0x6f, 0xad, 0xcf, 0x72] {
+                                        if tx.calldata.is_some() {
+                                            let tx_calldata = tx.calldata.clone();
+                                            if is_transmit_secondary(tx.calldata.clone()) {
+                                                let (tx_new_price, forward_to) = match get_price_from_input(&tx.calldata.unwrap()) {
+                                                    Ok((price, to)) => (price, to),
+                                                    Err(e) => {
+                                                        error!("INVALID PRICE UPDATE for mev-share: failed to get price from input: {e}");
+                                                        continue;
+                                                    }
+                                                };
+                                                let tx_from = match get_tx_sender_from_contract(provider.clone(), forward_to).await {
+                                                    Ok(from) => from,
+                                                    Err(e) => {
+                                                        error!("Failed to get mevshare tx_from from contract: {e}");
+                                                        continue;
+                                                    }
+                                                };
+                                                let bundle = PriceUpdateBundle {
+                                                    trace_id: format!("{:?}", event.hash)[2..10].to_string(),
+                                                    tx_new_price,
+                                                    forward_to, // vega uses this to know which asset(s) the update is for
+                                                    tx_to: tx.to.unwrap(),
+                                                    tx_from,
+                                                    tx_input: tx_calldata.unwrap(),
+                                                };
+                                                let message_bundle = MessageBundle::PriceUpdate(bundle.clone());
+                                                let serialized_bundle = match bincode::serialize(&message_bundle) {
+                                                    Ok(bundle) => bundle,
+                                                    Err(e) => {
+                                                        error!("Failed to serialize message bundle: {e}");
+                                                        continue;
+                                                    }
+                                                };
+                                                match vega_socket.send(&serialized_bundle, 0) {
+                                                    Ok(_) => (),
+                                                    Err(e) => {
+                                                        error!("Failed to send bundle to Vega: {e}");
+                                                        continue;
+                                                    }
+                                                };
+                                                let expected_block = match provider_clone.get_block_number().await {
+                                                    Ok(block) => block + 1,
+                                                    Err(e) => {
+                                                        warn!("Failed to get block number: {e}");
+                                                        u64::MIN
+                                                    }
+                                                };
+                                                info!(
+                                                    message = "MEVSHRE update sent.",
+                                                    expected_block = %expected_block,
+                                                    slot_info = %format!("{:?}", get_slot_information()),
+                                                    bundle = %format!("{:?}", bundle),
+                                                );
+                                                /*
+                                                info!(
+                                                    message = "MEVSHRE update sent.",
+                                                    trace_id = %bundle.trace_id,
+                                                    expected_block = %expected_block,
+                                                    tx_hash = %format!("{:?}", event.hash),
+                                                    slot_info = %format!("{:?}", get_slot_information()),
+                                                );
+                                                 */
+                                             }
+                                        } else {
+                                            continue //no calldata, nothing we can do
+                                        }
+                                    } else {
+                                        continue // not a forward() call
+                                    }
+                                } else {
+                                    continue // no selector available
+                                }
+                            }
                         }
                     }
                 }
