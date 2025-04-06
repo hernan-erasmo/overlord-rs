@@ -472,82 +472,75 @@ async fn main() {
                         }
                         PendingTxType::FromMevShare(event) => {
                             for tx in event.transactions {
-                                if tx.to.is_none() { // MevShare tx doesn't define 'to' field. Nothing to do.
+                                if tx.to.is_none() {
+                                    // MevShare tx doesn't define 'to' field. Nothing to do.
                                     continue;
                                 };
-                                if let Some(forward_selector) = tx.function_selector {
-                                    if forward_selector == [0x6f, 0xad, 0xcf, 0x72] {
-                                        if tx.calldata.is_some() {
-                                            let tx_calldata = tx.calldata.clone();
-                                            if is_transmit_secondary(tx.calldata.clone()) {
-                                                let (tx_new_price, forward_to) = match get_price_from_input(&tx.calldata.unwrap()) {
-                                                    Ok((price, to)) => (price, to),
-                                                    Err(e) => {
-                                                        error!("INVALID PRICE UPDATE for mev-share: failed to get price from input: {e}");
-                                                        continue;
-                                                    }
-                                                };
-                                                let tx_from = match get_tx_sender_from_contract(provider.clone(), forward_to).await {
-                                                    Ok(from) => from,
-                                                    Err(e) => {
-                                                        error!("Failed to get mevshare tx_from from contract: {e}");
-                                                        continue;
-                                                    }
-                                                };
-                                                let bundle = PriceUpdateBundle {
-                                                    trace_id: format!("{:?}", event.hash)[2..10].to_string(),
-                                                    tx_new_price,
-                                                    forward_to, // vega uses this to know which asset(s) the update is for
-                                                    tx_to: tx.to.unwrap(),
-                                                    tx_from,
-                                                    tx_input: tx_calldata.unwrap(),
-                                                };
-                                                let message_bundle = MessageBundle::PriceUpdate(bundle.clone());
-                                                let serialized_bundle = match bincode::serialize(&message_bundle) {
-                                                    Ok(bundle) => bundle,
-                                                    Err(e) => {
-                                                        error!("Failed to serialize message bundle: {e}");
-                                                        continue;
-                                                    }
-                                                };
-                                                match vega_socket.send(&serialized_bundle, 0) {
-                                                    Ok(_) => (),
-                                                    Err(e) => {
-                                                        error!("Failed to send bundle to Vega: {e}");
-                                                        continue;
-                                                    }
-                                                };
-                                                let expected_block = match provider_clone.get_block_number().await {
-                                                    Ok(block) => block + 1,
-                                                    Err(e) => {
-                                                        warn!("Failed to get block number: {e}");
-                                                        u64::MIN
-                                                    }
-                                                };
-                                                info!(
-                                                    message = "MEVSHRE update sent.",
-                                                    expected_block = %expected_block,
-                                                    slot_info = %format!("{:?}", get_slot_information()),
-                                                    bundle = %format!("{:?}", bundle),
-                                                );
-                                                /*
-                                                info!(
-                                                    message = "MEVSHRE update sent.",
-                                                    trace_id = %bundle.trace_id,
-                                                    expected_block = %expected_block,
-                                                    tx_hash = %format!("{:?}", event.hash),
-                                                    slot_info = %format!("{:?}", get_slot_information()),
-                                                );
-                                                 */
-                                             }
-                                        } else {
-                                            continue //no calldata, nothing we can do
+                                if tx.function_selector.is_none() {
+                                    // MevShare tx doesn't define function selector. Nothing to do.
+                                    continue;
+                                }
+                                if tx.function_selector.as_ref().map_or(true, |selector| selector != &[0x6f, 0xad, 0xcf, 0x72]) {
+                                    // Mevshare event function selector doesn't match forward()
+                                    continue;
+                                }
+                                if tx.calldata.is_none() {
+                                    // No calldata available for this mevshare event. Nothing to do
+                                    continue;
+                                }
+                                let tx_calldata = tx.calldata.clone();
+                                if is_transmit_secondary(tx.calldata.clone()) {
+                                    let (tx_new_price, forward_to) = match get_price_from_input(&tx.calldata.unwrap()) {
+                                        Ok((price, to)) => (price, to),
+                                        Err(e) => {
+                                            error!("INVALID PRICE UPDATE for mev-share: failed to get price from input: {e}");
+                                            continue;
                                         }
-                                    } else {
-                                        continue // not a forward() call
-                                    }
-                                } else {
-                                    continue // no selector available
+                                    };
+                                    let tx_from = match get_tx_sender_from_contract(provider.clone(), forward_to).await {
+                                        Ok(from) => from,
+                                        Err(e) => {
+                                            error!("Failed to get mevshare tx_from from contract: {e}");
+                                            continue;
+                                        }
+                                    };
+                                    let bundle = PriceUpdateBundle {
+                                        trace_id: format!("{:?}", event.hash)[2..10].to_string(),
+                                        tx_new_price,
+                                        forward_to, // vega uses this to know which asset(s) the update is for
+                                        tx_to: tx.to.unwrap(),
+                                        tx_from,
+                                        tx_input: tx_calldata.unwrap(),
+                                    };
+                                    let message_bundle = MessageBundle::PriceUpdate(bundle.clone());
+                                    let serialized_bundle = match bincode::serialize(&message_bundle) {
+                                        Ok(bundle) => bundle,
+                                        Err(e) => {
+                                            error!("Failed to serialize message bundle: {e}");
+                                            continue;
+                                        }
+                                    };
+                                    match vega_socket.send(&serialized_bundle, 0) {
+                                        Ok(_) => (),
+                                        Err(e) => {
+                                            error!("Failed to send bundle to Vega: {e}");
+                                            continue;
+                                        }
+                                    };
+                                    let expected_block = match provider_clone.get_block_number().await {
+                                        Ok(block) => block + 1,
+                                        Err(e) => {
+                                            warn!("Failed to get block number: {e}");
+                                            u64::MIN
+                                        }
+                                    };
+                                    info!(
+                                        message = "MEVSHRE update sent.",
+                                        trace_id = %bundle.trace_id,
+                                        expected_block = %expected_block,
+                                        tx_hash = %format!("{:?}", event.hash),
+                                        slot_info = %format!("{:?}", get_slot_information()),
+                                    );
                                 }
                             }
                         }
