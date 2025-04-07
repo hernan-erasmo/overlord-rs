@@ -404,7 +404,7 @@ async fn main() {
                     }
                     Err(e) => {
                         error!("Unknow stream enqueue error on mev-share receiver: {e}");
-                        break;
+                        continue;
                     }
                 }
             }

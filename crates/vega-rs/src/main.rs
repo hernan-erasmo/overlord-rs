@@ -52,14 +52,15 @@ async fn run_price_update_pipeline(
 ) {
     let pipeline_processing = Instant::now();
     let (address_buckets, affected_reserves) = cache.get_candidates_for_bundle(bundle).await;
+    let trace_id = bundle.map_or("initial-run".to_string(), |b| b.trace_id.clone());
     if address_buckets.len() == 1 && address_buckets[0].is_empty() {
-        info!("Not processing bundlef for trace_id {}", bundle.unwrap().trace_id);
+        info!("Not processing bundle for trace_id {} because it doesn't contain any addresses", trace_id);
         return;
     }
     let fork_provider = match ForkProvider::new(bundle).await {
         Ok(provider) => provider,
         Err(e) => {
-            warn!("Failed to spin up fork: {:?}", e);
+            warn!("Failed to spin up fork for bundle {}: {:?}", trace_id, e);
             return;
         }
     };
@@ -73,7 +74,6 @@ async fn run_price_update_pipeline(
             )
         })
         .collect::<Vec<(Address, String, U256)>>();
-    let trace_id = bundle.map_or("initial-run".to_string(), |b| b.trace_id.clone());
     let results = get_hf_for_users(
         address_buckets,
         fork_provider.fork_provider.as_ref().unwrap(),
@@ -92,12 +92,12 @@ async fn run_price_update_pipeline(
     );
     let hf_traces_dir = format!("{}/hf-traces", output_data_dir);
     if !std::path::Path::new(output_data_dir).is_dir() {
-        error!("Output directory does not exist: {}", output_data_dir);
+        error!("Output directory does not exist for bundle {}: {}", trace_id, output_data_dir);
         return;
     }
     std::fs::create_dir_all(&hf_traces_dir)
         .map_err(|e| {
-            error!("Failed to create hf-traces directory: {}", e);
+            error!("Failed to create hf-traces directory for bundle {}: {}", trace_id, e);
         })
         .ok();
     let hf_traces_filepath = format!("{}/{}.txt", hf_traces_dir, trace_id);
