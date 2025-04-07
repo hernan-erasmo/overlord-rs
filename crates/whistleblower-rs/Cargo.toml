@@ -5,11 +5,10 @@ edition = "2021"
 
 [dependencies]
 alloy.workspace = true
-alloy-primitives = "0.8.15"
+alloy-primitives.workspace = true
 alloy-rpc-types-eth = "0.8.3"
 bincode.workspace = true
 chrono.workspace = true
-ethers-core.workspace = true
 futures-util.workspace = true
 hex.workspace = true
 overlord-shared-types.workspace = true

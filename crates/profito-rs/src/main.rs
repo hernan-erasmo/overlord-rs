@@ -1,6 +1,7 @@
 mod cache;
 mod calculations;
 mod constants;
+mod mev_share_service;
 pub mod sol_bindings;
 mod utils;
 

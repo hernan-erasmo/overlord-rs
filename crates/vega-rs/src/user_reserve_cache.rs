@@ -459,13 +459,13 @@ impl UserReservesCache {
         let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
         info!(
             timestamp = %now,
-            bundle_id = %bundle.unwrap().trace_id,
+            trace_id = %bundle.unwrap().trace_id,
             processing_time_ms = bundle_processing_elapsed,
             total_candidates = duplicate_candidates.len(),
             unique_candidates = unique_candidates.len(),
             buckets = ?candidate_buckets.iter().map(|bucket| bucket.len()).collect::<Vec<_>>(),
             asset_details = %log_message,
-            "Bundle processing complete"
+            "Candidates ready for analysis"
         );
         (candidate_buckets, affected_reserves)
     }

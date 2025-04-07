@@ -83,10 +83,8 @@ async fn run_price_update_pipeline(
     )
     .await;
     let pipeline_processing_elapsed = pipeline_processing.elapsed().as_millis();
-    let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     info!(
-        "{} | pipeline:{} results | {} ms | {} candidates processed | {} with HF < 1",
-        now,
+        "Candidates analysis complete for {} | {} ms | {} candidates processed | {} with HF < 1",
         trace_id.clone(),
         pipeline_processing_elapsed,
         results.raw_results.len(),
