@@ -61,6 +61,12 @@ const SECONDS_BEFORE_RECONNECTION: u64 = 2;
 const PATH_TO_ADDRESSES_INPUT: &str = "crates/oops-rs/addresses.txt";
 const VEGA_INBOUND_ENDPOINT: &str = "ipc:///tmp/vega_inbound";
 
+struct ProcessingHandles {
+    mempool: tokio::task::JoinHandle<()>,
+    mevshare: tokio::task::JoinHandle<()>,
+    processor: tokio::task::JoinHandle<()>,
+}
+
 #[derive(Clone)]
 enum PendingTxType {
     FromMempool(Transaction),
@@ -317,6 +323,15 @@ async fn create_mev_share_stream() -> Result<EventStream<mev_share_sse::Event>, 
     Ok(stream)
 }
 
+async fn shutdown_handlers(handles: ProcessingHandles) {
+    handles.mempool.abort();
+    handles.mevshare.abort();
+    handles.processor.abort();
+    info!("Shutting down handlers");
+    let _ = tokio::join!(handles.mempool, handles.mevshare, handles.processor);
+    info!("Handlers shut down");
+}
+
 #[tokio::main]
 async fn main() {
     _setup_logging();
@@ -553,11 +568,19 @@ async fn main() {
             }
         });
 
+        let mut handles = ProcessingHandles {
+            mempool: mempool_receiver_handle,
+            mevshare: mev_share_receiver_handle,
+            processor: processor_handle,
+        };
+    
         tokio::select! {
-            _ = mempool_receiver_handle => error!("Mempool receiver handle ended. This should NEVER happen during operation."),
-            _ = mev_share_receiver_handle => error!("MevShare receiver handle ended. This should NEVER happen during operation."),
-            _ = processor_handle => error!("Processor handle ended. This should NEVER happen during operation."),
-        }
+            r = &mut handles.mempool => error!("Mempool receiver handle ended unexpectedly: {:?}", r),
+            r = &mut handles.mevshare => error!("MevShare receiver handle ended unexpectedly: {:?}", r),
+            r = &mut handles.processor => error!("Processor handle ended unexpectedly: {:?}", r),
+        };
+
+        shutdown_handlers(handles).await;
 
         sleep(Duration::from_secs(SECONDS_BEFORE_RECONNECTION)).await;
     }
