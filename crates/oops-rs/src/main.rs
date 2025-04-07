@@ -573,7 +573,7 @@ async fn main() {
             mevshare: mev_share_receiver_handle,
             processor: processor_handle,
         };
-    
+
         tokio::select! {
             r = &mut handles.mempool => error!("Mempool receiver handle ended unexpectedly: {:?}", r),
             r = &mut handles.mevshare => error!("MevShare receiver handle ended unexpectedly: {:?}", r),

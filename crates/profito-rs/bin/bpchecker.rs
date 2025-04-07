@@ -547,7 +547,7 @@ async fn main() {
             .unwrap_or_else(|_| H256::zero());
         println!(
             "export PRICE_UPDATE_TX_HASH={} && \\",
-            price_update_tx_hash,
+            hex::encode(price_update_tx_hash.as_bytes()),
         );
         println!("export PRICE_UPDATE_BLOCK={} && \\", block_number - 1); // One less because forge will also replay the price update tx
         println!(
