@@ -323,15 +323,6 @@ async fn create_mev_share_stream() -> Result<EventStream<mev_share_sse::Event>, 
     Ok(stream)
 }
 
-async fn shutdown_handlers(handles: ProcessingHandles) {
-    handles.mempool.abort();
-    handles.mevshare.abort();
-    handles.processor.abort();
-    info!("Shutting down handlers");
-    let _ = tokio::join!(handles.mempool, handles.mevshare, handles.processor);
-    info!("Handlers shut down");
-}
-
 #[tokio::main]
 async fn main() {
     _setup_logging();
@@ -404,7 +395,7 @@ async fn main() {
                     }
                     Err(e) => {
                         error!("Unknow stream enqueue error on mev-share receiver: {e}");
-                        continue;
+                        break;
                     }
                 }
             }
@@ -575,12 +566,16 @@ async fn main() {
         };
 
         tokio::select! {
-            r = &mut handles.mempool => error!("Mempool receiver handle ended unexpectedly: {:?}", r),
-            r = &mut handles.mevshare => error!("MevShare receiver handle ended unexpectedly: {:?}", r),
-            r = &mut handles.processor => error!("Processor handle ended unexpectedly: {:?}", r),
+            _ = &mut handles.mempool => error!("Mempool receiver handle ended unexpectedly. Restarting all handlers"),
+            _ = &mut handles.mevshare => error!("MevShare receiver handle ended unexpectedly. Restarting all handlers"),
+            _ = &mut handles.processor => error!("Processor handle ended unexpectedly. Restarting all handlers"),
         };
 
-        shutdown_handlers(handles).await;
+        info!("tokio::select finished. Aborting all handlers");
+        handles.mempool.abort();
+        handles.mevshare.abort();
+        handles.processor.abort();
+        info!("Handlers ended. Restarting all handlers");
 
         sleep(Duration::from_secs(SECONDS_BEFORE_RECONNECTION)).await;
     }
