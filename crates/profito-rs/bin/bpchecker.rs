@@ -559,6 +559,7 @@ async fn main() {
             weth_to_debt_fee.to_string()
         );
         println!("export BUILDER_BRIBE={} && \\", "0"); // TODO
+        println!("export FLASH_LOAN_SOURCE={} && \\", "1"); // TODO: Logic to determine this based on available liquidity: 1-Morpho, 2-AAVE
         println!("forge test --match-test testLiquidation -vvvvv --gas-report");
         println!("\n");
 
