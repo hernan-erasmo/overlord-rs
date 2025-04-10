@@ -543,8 +543,9 @@ async fn main() {
                 .unwrap_or_else(|_| "Couldn't read PRICE_UPDATE_FROM from env".to_string())
         );
         let price_update_tx_hash = std::env::var("PRICE_UPDATE_TX")
-            .map(|hash| hash.parse::<H256>().unwrap())
-            .unwrap_or_else(|_| H256::zero());
+            .ok()
+            .and_then(|hash| hash.parse::<H256>().ok())
+            .unwrap_or_else(|| H256::zero());
         println!(
             "export PRICE_UPDATE_TX_HASH={} && \\",
             hex::encode(price_update_tx_hash.as_bytes()),
@@ -562,6 +563,25 @@ async fn main() {
         println!("export FLASH_LOAN_SOURCE={} && \\", "1"); // TODO: Logic to determine this based on available liquidity: 1-Morpho, 2-AAVE
         println!("forge test --match-test testLiquidation -vvvvv --gas-report");
         println!("\n");
+
+        // After your existing print statements, add:
+        println!("\n### Cast call command for triggerLiquidation ###");
+        println!(
+            "cast send --private-key {} --rpc-url http://localhost:8545 {} \"triggerLiquidation((uint256,address,address,address,uint24,uint24,uint16,uint8,uint256))((uint256,address,address,address,uint24,uint24,uint16,uint8,uint256))\" \"({},{},{},{},{},{},{},{},{})\"",
+            std::env::var("FOXDIE_OWNER_PK")
+                .unwrap_or_else(|_| "PRIVATE KEY NOT DEFINED".to_string()),
+            std::env::var("FOXDIE_ADDRESS")
+                .unwrap_or_else(|_| "FOXDIE ADDRESS NOT DEFINED".to_string()),
+            best.actual_debt_to_liquidate,      // debtAmount
+            user_address,                       // user
+            best.debt_asset,                    // debtAsset
+            best.collateral_asset,             // collateral
+            collateral_to_weth_fee.to_string(), // collateralToWethFee
+            weth_to_debt_fee.to_string(),      // wethToDebtFee
+            0,                                 // bribePercentBps
+            1,                                 // flashLoanSource
+            0,                                 // aavePremium
+        );
 
         if simulate_bundle {
             println!("\n### Simulating bundle execution with MevShare ###\n");
