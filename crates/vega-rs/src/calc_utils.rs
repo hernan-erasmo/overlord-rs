@@ -11,6 +11,14 @@ use tracing::warn;
 
 const HF_MIN_THRESHOLD: u128 = 1_000_000_000_000_000_000u128;
 
+// From observations in profito, these are comparisons between collateral
+// and expected profit:
+// > 1e9 ~ $0.xx to $9.xx
+// > 1e10 ~ $10.xx to $99.xx
+// > 1e11 ~ $100.xx to $999.xx
+// > 1e12 ~ $1000.xx and above
+const MIN_REPORTABLE_COLLATERAL: f64 = 1e9;
+
 pub struct UnderwaterUserEventBus {
     sender: broadcast::Sender<UnderwaterUserEvent>,
 }
@@ -65,7 +73,7 @@ pub async fn get_hf_for_users(
                 let result = pool.getUserAccountData(address).call().await;
                 match result {
                     Ok(data) => {
-                        if data.healthFactor < U256::from(HF_MIN_THRESHOLD) && data.totalCollateralBase > U256::from(1e9) {
+                        if data.healthFactor < U256::from(HF_MIN_THRESHOLD) && data.totalCollateralBase > U256::from(MIN_REPORTABLE_COLLATERAL) {
                             if let Some(bus) = &event_bus {
                                 bus.send(UnderwaterUserEvent {
                                     address,
