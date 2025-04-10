@@ -11,6 +11,7 @@ use ethers_core::{
 use profito_rs::cache::PriceCache;
 use profito_rs::{
     calculations::{
+        BRIBE_IN_BASIS_POINTS,
         BestPair,
         percent_div,
         percent_mul,
@@ -578,7 +579,7 @@ async fn main() {
             best.collateral_asset,             // collateral
             collateral_to_weth_fee.to_string(), // collateralToWethFee
             weth_to_debt_fee.to_string(),      // wethToDebtFee
-            0,                                 // bribePercentBps
+            BRIBE_IN_BASIS_POINTS,             // bribePercentBps
             1,                                 // flashLoanSource
             0,                                 // aavePremium
         );

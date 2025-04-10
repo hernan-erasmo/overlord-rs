@@ -15,6 +15,8 @@ use super::{
 };
 use tracing::warn;
 
+pub const BRIBE_IN_BASIS_POINTS: u32 = 5000; // 50%
+
 #[derive(Debug)]
 pub struct BestPair {
     pub collateral_asset: Address,
@@ -612,7 +614,7 @@ async fn calculate_available_collateral_to_liquidate(
 /// Returns the appropriate bribe based on the amount earned
 pub fn calculate_bribe(reward_amount: U256) -> U256 {
     // From 0 to 9999
-    return U256::from(2000); // 20%
+    return U256::from(BRIBE_IN_BASIS_POINTS); // 50%
 }
 
 /// Not exactly the same as the one from bpchecker
