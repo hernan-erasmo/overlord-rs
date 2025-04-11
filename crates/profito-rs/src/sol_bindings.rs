@@ -80,6 +80,7 @@ sol!(
 sol!(
     #[allow(missing_docs)]
     #[allow(clippy::too_many_arguments)]
+    #[derive(Debug, PartialEq)]
     #[sol(rpc)]
     contract Foxdie {
         enum FlashLoanSource {
