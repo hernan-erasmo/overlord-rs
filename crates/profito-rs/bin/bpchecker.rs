@@ -12,6 +12,7 @@ use profito_rs::{
         BRIBE_IN_BASIS_POINTS,
         BestPair,
         estimate_gas,
+        get_best_liquidity_provider,
         percent_div,
         percent_mul,
         calculate_actual_debt_to_liquidate,
@@ -27,6 +28,7 @@ use profito_rs::{
     sol_bindings::{
         pool::AaveV3Pool,
         AaveOracle, AaveProtocolDataProvider,
+        Foxdie,
         IUiPoolDataProviderV3::{AggregatedReserveData, UserReserveData},
     },
     utils::{ReserveConfigurationEnhancedData, generate_reserve_details_by_asset, get_user_reserves_data},
@@ -328,7 +330,14 @@ async fn get_best_liquidation_opportunity(
             // TODO(Hernan): do we need to make sure this doesn't bite us in the ass?
             // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L320-L344
 
-            if net_profit > best_pair.as_ref().map_or(U256::ZERO, |p| p.net_profit) {
+            let best_liquidity_provider = get_best_liquidity_provider(
+                provider.clone(),
+                borrowed_reserve.underlyingAsset,
+                actual_debt_to_liquidate
+            ).await;
+            if net_profit > best_pair.as_ref().map_or(U256::ZERO, |p| p.net_profit)
+                && best_liquidity_provider != Foxdie::FlashLoanSource::NONE
+            {
                 best_pair = Some(BestPair {
                     collateral_asset: supplied_reserve.underlyingAsset,
                     debt_asset: borrowed_reserve.underlyingAsset,
@@ -337,6 +346,7 @@ async fn get_best_liquidation_opportunity(
                     actual_collateral_to_liquidate,
                     actual_debt_to_liquidate,
                     liquidation_protocol_fee_amount,
+                    flash_loan_source: best_liquidity_provider,
                 });
             }
 
@@ -387,7 +397,7 @@ fn print_foxdie_local_testing_instructions(
         weth_to_debt_fee.to_string()
     );
     println!("export BUILDER_BRIBE={} && \\", "0"); // TODO
-    println!("export FLASH_LOAN_SOURCE={} && \\", "1"); // TODO: Logic to determine this based on available liquidity: 1-Morpho, 2-AAVE
+    println!("export FLASH_LOAN_SOURCE={:?} && \\", best.flash_loan_source as u8);
     println!("forge test --match-test testLiquidation -vvvvv --gas-report");
     println!("\n##################################################");
 }
