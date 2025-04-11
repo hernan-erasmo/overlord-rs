@@ -102,10 +102,13 @@ impl ForkProvider {
         // Step 0: Get a provider for the main chain
         let ipc_url = "/tmp/reth.ipc";
         let ipc = IpcConnect::new(ipc_url.to_string());
+        let trace_id = bundle
+            .map(|b| b.trace_id.to_string())
+            .unwrap_or_else(|| "NO_TRACE_ID".to_string());
         let provider = match ProviderBuilder::new().on_ipc(ipc).await {
             Ok(provider) => provider,
             Err(e) => {
-                warn!("Failed to connect to IPC: {:?}", e);
+                warn!("Failed to connect to IPC for bundle {}: {:?}", trace_id, e);
                 return Err("Failed to connect to IPC".to_string());
             }
         };
@@ -118,7 +121,7 @@ impl ForkProvider {
         {
             Some(block) => block,
             None => {
-                warn!("Failed to get block for forking");
+                warn!("Failed to get block for forking trace id {}", trace_id);
                 return Err("Failed to get block for forking".to_string());
             }
         };
@@ -126,9 +129,6 @@ impl ForkProvider {
         // Step 2: Spin up the anvil fork at the given block
         // Any error raised after this line must properly close the anvil process
         // or it will become a zombie
-        let trace_id = bundle
-            .map(|b| b.trace_id.to_string())
-            .unwrap_or_else(|| "UNWRAP_ERROR".to_string());
         let fork_path = format!(
             "./fork_{}.ipc",
             trace_id,
