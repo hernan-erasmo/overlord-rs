@@ -558,7 +558,6 @@ async fn main() {
         println!("export BUILDER_BRIBE={} && \\", "0"); // TODO
         println!("export FLASH_LOAN_SOURCE={} && \\", "1"); // TODO: Logic to determine this based on available liquidity: 1-Morpho, 2-AAVE
         println!("forge test --match-test testLiquidation -vvvvv --gas-report");
-        println!("\n");
 
         // After your existing print statements, add:
         println!("\n### Cast call command for triggerLiquidation ###");
@@ -578,6 +577,7 @@ async fn main() {
             1,                                 // flashLoanSource
             0,                                 // aavePremium
         );
+        println!("\n");
 
         if simulate_bundle {
             println!("\n### Simulating bundle execution with MevShare ###\n");
