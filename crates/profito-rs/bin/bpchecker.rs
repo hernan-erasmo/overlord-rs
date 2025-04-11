@@ -13,6 +13,7 @@ use profito_rs::{
     calculations::{
         BRIBE_IN_BASIS_POINTS,
         BestPair,
+        estimate_gas,
         percent_div,
         percent_mul,
         calculate_actual_debt_to_liquidate,
@@ -158,7 +159,7 @@ async fn calculate_available_collateral_to_liquidate(
         Ok(price) => U256::from(price) / U256::from(1e3),
         _ => U256::MAX,
     };
-    let execution_gas_cost = (gas_used_estimation * gas_price_in_gwei) / U256::from(1000000);
+    let (gas_used, gas_price, execution_gas_cost) = estimate_gas(provider.clone()).await;
     // this assumes we will swap in 1% fee pools (could be more sophisticated)
     // uniswap v3 fees are represented as hundredths of basis points: 1% == 100; 0,3% == 30; 0,05% == 5; 0,01% == 1
     let swap_loss_factor = U256::from(100);
@@ -185,7 +186,7 @@ async fn calculate_available_collateral_to_liquidate(
         "\t\t\tdebt in collateral units: {}",
         debt_in_collateral_units
     );
-    println!("\t\t\texecution gas cost: {}", execution_gas_cost);
+    println!("\t\t\texecution gas cost (used, price, total): {}, {}, {}", gas_used, gas_price, execution_gas_cost);
     println!("\t\t\tswap total cost: {}", swap_total_cost);
     println!("\t\t\tnet profit = col amount - debt in col units - execution cost - swap cost = {} ($ {})", net_profit, format_units(net_profit * collateral_asset_price, 8 + u8::try_from(collateral_decimals).unwrap()).unwrap());
 

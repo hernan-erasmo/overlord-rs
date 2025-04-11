@@ -106,7 +106,7 @@ async fn process_uw_event(
         let (collateral_to_weth_fee, weth_to_debt_fee) =
             calculate_best_swap_fees(provider.clone(), best_pair.collateral_asset, best_pair.debt_asset)
             .await;
-        let bribe = calculate_bribe(best_pair.net_profit);
+        let bribe = calculate_bribe();
 
         info!(
             "liquidate {} @ {} for ${} (total collateral {})",
