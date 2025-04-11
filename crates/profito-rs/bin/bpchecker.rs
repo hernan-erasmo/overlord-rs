@@ -8,8 +8,8 @@ use ethers_core::{
     types::{H256, transaction::eip2718::TypedTransaction, Eip1559TransactionRequest, U256 as ethersU256, H160},
     utils::{hex, keccak256},
 };
-use profito_rs::cache::PriceCache;
 use profito_rs::{
+    cache::PriceCache,
     calculations::{
         BRIBE_IN_BASIS_POINTS,
         BestPair,
@@ -153,12 +153,6 @@ async fn calculate_available_collateral_to_liquidate(
         debt_in_collateral_units - collateral_amount
     };
 
-    // TODO(Hernan): make gas and swap calculations more sophisticated
-    let gas_used_estimation = U256::from(1000000);
-    let gas_price_in_gwei = match provider.get_gas_price().await {
-        Ok(price) => U256::from(price) / U256::from(1e3),
-        _ => U256::MAX,
-    };
     let (gas_used, gas_price, execution_gas_cost) = estimate_gas(provider.clone()).await;
     // this assumes we will swap in 1% fee pools (could be more sophisticated)
     // uniswap v3 fees are represented as hundredths of basis points: 1% == 100; 0,3% == 30; 0,05% == 5; 0,01% == 1
