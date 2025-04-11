@@ -1,6 +1,6 @@
-use crate::constants::{AAVE_ORACLE_ADDRESS, AAVE_V3_POOL_ADDRESS, AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS, AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, AAVE_V3_PROVIDER_ADDRESS, UNISWAP_V3_FACTORY, WETH};
+use crate::constants::{AAVE_ORACLE_ADDRESS, AAVE_V3_POOL_ADDRESS, AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS, AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, AAVE_V3_PROVIDER_ADDRESS, FOXDIE_ADDRESS, UNISWAP_V3_FACTORY, WETH};
 use alloy::{
-    primitives::{aliases::U24, Address, U256, utils::format_units},
+    primitives::{aliases::U24, utils::format_units, Address, U16, U256},
     providers::{Provider, RootProvider},
     pubsub::PubSubFrontend,
 };
@@ -10,12 +10,12 @@ use super::{
     cache::PriceCache,
     sol_bindings::{
         AaveOracle, IUiPoolDataProviderV3::{AggregatedReserveData, UserReserveData},
-        IAToken, ERC20, pool::AaveV3Pool, AaveUIPoolDataProvider, AaveProtocolDataProvider, UniswapV3Pool, UniswapV3Factory
+        IAToken, ERC20, pool::AaveV3Pool, AaveUIPoolDataProvider, AaveProtocolDataProvider, UniswapV3Pool, UniswapV3Factory, Foxdie
     }
 };
 use tracing::warn;
 
-pub const BRIBE_IN_BASIS_POINTS: u32 = 5000; // 50%
+pub const BRIBE_IN_BASIS_POINTS: u16 = 5000; // 50%
 
 #[derive(Debug)]
 pub struct BestPair {
@@ -515,6 +515,40 @@ pub async fn calculate_best_swap_fees(
     best_fees
 }
 
+/// TODO: This function is not returning the appropriate amount of gas and needs
+/// to be fixed.
+pub async fn estimate_gas(provider: Arc<RootProvider<PubSubFrontend>>) -> (U256, U256, U256) {
+    let default_gas_used = U256::from(700000);
+    let gas_price_in_gwei = match provider.get_gas_price().await {
+        Ok(price) => U256::from(price) / U256::from(1e3),
+        _ => U256::MAX,
+    };
+    return (default_gas_used, gas_price_in_gwei, default_gas_used * gas_price_in_gwei / U256::from(1000000))
+    /*
+    match Foxdie::new(FOXDIE_ADDRESS, provider.clone())
+        .triggerLiquidation(Foxdie::LiquidationParams {
+            debtAmount: U256::ZERO,
+            user: Address::ZERO,
+            debtAsset: Address::ZERO,
+            collateral: Address::ZERO,
+            collateralToWethFee: U24::from(0),
+            wethToDebtFee: U24::from(0),
+            bribePercentBps: BRIBE_IN_BASIS_POINTS,
+            flashLoanSource: Foxdie::FlashLoanSource::MORPHO,
+            aavePremium: U256::ZERO,
+        }).estimate_gas().await {
+            Ok(gas_used) => {
+                (U256::from(gas_used), gas_price_in_gwei, U256::from(gas_used) * gas_price_in_gwei / U256::from(1000000))
+            },
+            Err(e) => {
+                println!("Error estimating gas: {}", e);
+                warn!("Error estimating gas: {}", e);
+                return (default_gas_used, gas_price_in_gwei, default_gas_used * gas_price_in_gwei / U256::from(1000000))
+            }
+        }
+     */
+}
+
 /// This function is supposed to be the EXACT SAME copy of the one defined
 /// in bpchecker, with the only difference being the removal of print statements
 /// and different error handling. Logic MUST BE THE SAME. The problem is that
@@ -582,13 +616,7 @@ async fn calculate_available_collateral_to_liquidate(
         debt_in_collateral_units - collateral_amount
     };
 
-    // TODO(Hernan): make gas and swap calculations more sophisticated
-    let gas_used_estimation = U256::from(1000000);
-    let gas_price_in_gwei = match provider.get_gas_price().await {
-        Ok(price) => U256::from(price) / U256::from(1e3),
-        _ => U256::MAX,
-    };
-    let execution_gas_cost = (gas_used_estimation * gas_price_in_gwei) / U256::from(1000000);
+    let execution_gas_cost = estimate_gas(provider.clone()).await.2;
     // this assumes we will swap in 1% fee pools (could be more sophisticated)
     // uniswap v3 fees are represented as hundredths of basis points: 1% == 100; 0,3% == 30; 0,05% == 5; 0,01% == 1
     let swap_loss_factor = U256::from(100);
@@ -612,7 +640,7 @@ async fn calculate_available_collateral_to_liquidate(
 }
 
 /// Returns the appropriate bribe based on the amount earned
-pub fn calculate_bribe(reward_amount: U256) -> U256 {
+pub fn calculate_bribe() -> U256 {
     // From 0 to 9999
     return U256::from(BRIBE_IN_BASIS_POINTS); // 50%
 }
