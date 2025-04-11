@@ -17,7 +17,7 @@ use tracing::warn;
 
 pub const BRIBE_IN_BASIS_POINTS: u16 = 5000; // 50%
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct BestPair {
     pub collateral_asset: Address,
     pub debt_asset: Address,
