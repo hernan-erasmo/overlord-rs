@@ -323,6 +323,15 @@ async fn get_best_liquidation_opportunity(
             )
             .await;
             println!("\t\tv3.3 actual collateral to liquidate, actual debt to liquidate, fee amount, collateral to liquidate in base currency = {} / {} / {} / {}", actual_collateral_to_liquidate, actual_debt_to_liquidate, liquidation_protocol_fee_amount, collateral_to_liquidate_in_base_currency);
+            let best_liquidity_provider = get_best_liquidity_provider(
+                provider.clone(),
+                borrowed_reserve.underlyingAsset,
+                actual_debt_to_liquidate
+            ).await;
+            println!("\t\ttake liquidity from {:?}", best_liquidity_provider.source);
+            for reason in best_liquidity_provider.reasons.iter() {
+                println!("\t\t\t- {}", reason);
+            }
             println!(""); // space before next pair
                           // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L309
 
@@ -330,13 +339,8 @@ async fn get_best_liquidation_opportunity(
             // TODO(Hernan): do we need to make sure this doesn't bite us in the ass?
             // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L320-L344
 
-            let best_liquidity_provider = get_best_liquidity_provider(
-                provider.clone(),
-                borrowed_reserve.underlyingAsset,
-                actual_debt_to_liquidate
-            ).await;
             if net_profit > best_pair.as_ref().map_or(U256::ZERO, |p| p.net_profit)
-                && best_liquidity_provider != Foxdie::FlashLoanSource::NONE
+                && best_liquidity_provider.source != Foxdie::FlashLoanSource::NONE
             {
                 best_pair = Some(BestPair {
                     collateral_asset: supplied_reserve.underlyingAsset,
@@ -346,7 +350,7 @@ async fn get_best_liquidation_opportunity(
                     actual_collateral_to_liquidate,
                     actual_debt_to_liquidate,
                     liquidation_protocol_fee_amount,
-                    flash_loan_source: best_liquidity_provider,
+                    flash_loan_source: best_liquidity_provider.source,
                 });
             }
 
@@ -683,5 +687,7 @@ async fn main() {
             ).await.unwrap();
             println!("\n### End of simulation output ###\n");
         }
+    } else {
+        println!("\tNo profitable liquidation opportunity found.");
     }
 }

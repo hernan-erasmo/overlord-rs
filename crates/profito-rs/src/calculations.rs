@@ -9,7 +9,7 @@ use crate::constants::{
     WETH,
 };
 use alloy::{
-    primitives::{aliases::U24, utils::format_units, Address, U16, U256},
+    primitives::{aliases::U24, utils::format_units, Address, U256},
     providers::{Provider, RootProvider},
     pubsub::PubSubFrontend,
 };
@@ -46,12 +46,18 @@ pub struct BestPair {
     pub flash_loan_source: Foxdie::FlashLoanSource,
 }
 
+#[derive(Clone, Debug)]
+pub struct LiquiditySolution {
+    pub source: Foxdie::FlashLoanSource,
+    pub reasons: Vec<String>,
+}
+
 pub async fn get_best_liquidity_provider(
     provider: Arc<RootProvider<PubSubFrontend>>,
     debt_asset: Address,
     actual_debt_to_liquidate: U256,
-) -> Foxdie::FlashLoanSource {
-    let no_liquidity = Foxdie::FlashLoanSource::NONE;
+) -> LiquiditySolution {
+    let mut reasons = vec![];
 
     // Query MORPHO's balanceOf asset that we'll need to borrow
     let morpho_balance = match ERC20::new(debt_asset, provider.clone())
@@ -61,15 +67,47 @@ pub async fn get_best_liquidity_provider(
     {
         Ok(balance_of_response) => balance_of_response.balance,
         Err(e) => {
-            println!("Error trying to call balanceOf for {}: {}", debt_asset, e);
-            return Foxdie::FlashLoanSource::NONE;
+            let error_msg = format!("Error trying to call balanceOf for {}: {}", debt_asset, e);
+            warn!("{}", error_msg);
+            reasons.push(error_msg);
+            return LiquiditySolution {
+                source: Foxdie::FlashLoanSource::NONE,
+                reasons
+            };
         }
     };
 
     // If MORPHO's balance is enough, then we don't need to continue processing
     if morpho_balance >= actual_debt_to_liquidate {
-        return Foxdie::FlashLoanSource::MORPHO;
+        return LiquiditySolution {
+            source: Foxdie::FlashLoanSource::MORPHO,
+            reasons
+        };
+    } else {
+        reasons.push(format!("MORPHO balance for {} ({}) is not enough", debt_asset, morpho_balance));
     }
+
+    let pool_data_provider = AaveProtocolDataProvider::new(AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS, provider.clone());
+    let is_flashloan_enabled = match pool_data_provider.getFlashLoanEnabled(debt_asset).call().await {
+        Ok(res) => res._0,
+        Err(e) => {
+            let error_msg = format!("Error trying to determine if AAVE flashloan is enabled for {}: {}", debt_asset, e);
+            warn!("{}", error_msg.clone());
+            reasons.push(error_msg);
+            return LiquiditySolution {
+                source: Foxdie::FlashLoanSource::NONE,
+                reasons
+            };
+        }
+    };
+
+    if !is_flashloan_enabled {
+        reasons.push(format!("AAVE flashLoan is not enabled for {}", debt_asset));
+        return LiquiditySolution {
+            source: Foxdie::FlashLoanSource::NONE,
+            reasons
+        };
+    };
 
     // The process to query AAVE v3 balances is a little more indirect. First we need to get the
     // AToken contract address corresponding to the underlying we want to borrow:
@@ -77,8 +115,13 @@ pub async fn get_best_liquidity_provider(
         .getReserveData(debt_asset).call().await {
             Ok(reserve_data) => reserve_data._0.aTokenAddress,
             Err(e) => {
-                warn!("Couldn't get reserve data for calculating best flash loan provider for debt {}: {}", debt_asset, e);
-                return Foxdie::FlashLoanSource::NONE;
+                let error_msg = format!("Couldn't get reserve data for calculating best flash loan provider for debt {}: {}", debt_asset, e);
+                warn!("{}", error_msg.clone());
+                reasons.push(error_msg);
+                return LiquiditySolution {
+                    source: Foxdie::FlashLoanSource::NONE,
+                    reasons
+                };
             }
         };
 
@@ -90,18 +133,29 @@ pub async fn get_best_liquidity_provider(
     {
         Ok(balance_of_response) => balance_of_response.balance,
         Err(e) => {
-            println!("Error trying to call balanceOf for {}: {}", debt_asset, e);
-            return Foxdie::FlashLoanSource::NONE;
+            let error_msg = format!("Error trying to call balanceOf for {}: {}", debt_asset, e);
+            warn!("{}", error_msg.clone());
+            reasons.push(error_msg);
+            return LiquiditySolution {
+                source: Foxdie::FlashLoanSource::NONE,
+                reasons
+            };
         }
     };
 
     if aave_balance >= actual_debt_to_liquidate {
-        return Foxdie::FlashLoanSource::AAVE_V3;
+        return LiquiditySolution {
+            source: Foxdie::FlashLoanSource::AAVE_V3,
+            reasons
+        };
     } else {
-        warn!("Not enough liquidity of {} from any provider to fully cover this liquidation", debt_asset);
+        reasons.push(format!("AAVE V3 balance for {} ({}) is not enough", debt_asset, aave_balance));
     }
 
-    no_liquidity
+    LiquiditySolution {
+        source: Foxdie::FlashLoanSource::NONE,
+        reasons
+    }
 }
 
 /// This mimics `percentMul` at
@@ -838,7 +892,7 @@ pub async fn get_best_liquidation_opportunity(
                 actual_debt_to_liquidate
             ).await;
             if net_profit > best_pair.as_ref().map_or(U256::ZERO, |p| p.net_profit)
-                && best_liquidity_provider != Foxdie::FlashLoanSource::NONE
+                && best_liquidity_provider.source != Foxdie::FlashLoanSource::NONE
             {
                 best_pair = Some(BestPair {
                     collateral_asset: supplied_reserve.underlyingAsset,
@@ -848,7 +902,7 @@ pub async fn get_best_liquidation_opportunity(
                     actual_collateral_to_liquidate,
                     actual_debt_to_liquidate,
                     liquidation_protocol_fee_amount,
-                    flash_loan_source: best_liquidity_provider,
+                    flash_loan_source: best_liquidity_provider.source,
                 });
             }
         }
