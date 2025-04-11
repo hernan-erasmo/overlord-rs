@@ -8,6 +8,7 @@ pub const AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS: Address =
 pub const AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS: Address =
     address!("3f78bbd206e4d3c504eb854232eda7e47e9fd8fc");
 pub const UNISWAP_V3_FACTORY: Address = address!("1F98431c8aD98523631AE4a59f267346ea31F984");
+pub const FOXDIE_ADDRESS: Address = address!("55710f6cE35d5b6928D7192D0955387C2cf6c492");
 
 // used on bpchecker
 pub const AAVE_V3_POOL_ADDRESS: Address = address!("87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2");

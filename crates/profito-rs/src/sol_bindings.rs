@@ -77,6 +77,34 @@ sol!(
     "src/abis/uniswap_v3_pool.json"
 );
 
+sol!(
+    #[allow(missing_docs)]
+    #[allow(clippy::too_many_arguments)]
+    #[sol(rpc)]
+    contract Foxdie {
+        enum FlashLoanSource {
+            NONE,      // 0 - invalid
+            MORPHO,    // 1
+            AAVE_V3,   // 2
+            BALANCER   // 3
+        }
+
+        struct LiquidationParams {
+            uint256 debtAmount;    // Amount to repay
+            address user;           // User to liquidate
+            address debtAsset;     // Asset they borrowed
+            address collateral;     // Their collateral asset
+            uint24 collateralToWethFee; // Uniswap pool fee tier
+            uint24 wethToDebtFee;       // Uniswap pool fee tier
+            uint16 bribePercentBps;    // Builder bribe in basis points (e.g., 1500 = 15%)
+            FlashLoanSource flashLoanSource; // Which protocol to use for flash loan
+            uint256 aavePremium; // AAVE V3 premium (if applicable, otherwise zero)
+        }
+
+        function triggerLiquidation(LiquidationParams calldata params) external;
+    }
+);
+
 pub mod pool {
     use alloy::sol;
     sol!(
