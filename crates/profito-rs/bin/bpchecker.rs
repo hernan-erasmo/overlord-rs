@@ -1,12 +1,10 @@
 use alloy::{
-    primitives::{utils::format_units, Address, U256},
+    primitives::{aliases::U24, utils::format_units, Address, U256},
     providers::{IpcConnect, Provider, ProviderBuilder, RootProvider},
     pubsub::PubSubFrontend,
 };
 use ethers_core::{
-    abi::{encode, Token, ParamType},
-    types::{H256, transaction::eip2718::TypedTransaction, Eip1559TransactionRequest, U256 as ethersU256, H160},
-    utils::{hex, keccak256},
+    abi::{encode, ParamType, Token}, types::{transaction::eip2718::TypedTransaction, Eip1559TransactionRequest, H160, H256, U256 as ethersU256}, utils::{hex, keccak256}
 };
 use profito_rs::{
     cache::PriceCache,
@@ -348,6 +346,84 @@ async fn get_best_liquidation_opportunity(
     best_pair
 }
 
+fn print_foxdie_local_testing_instructions(
+    best: BestPair,
+    debt_symbol: &str,
+    collateral_symbol: &str,
+    user_address: Address,
+    block_number: u64,
+    collateral_to_weth_fee: U24,
+    weth_to_debt_fee: U24,
+    price_update_tx_hash: H256,
+) {
+    println!("\n##################################################");
+    println!("🟢 Command for testing Foxdie deployed locally 🟢");
+    println!("--------------------------------------------------\n");
+    println!("export DEBT_SYMBOL={} && \\", debt_symbol);
+    println!("export {}={} && \\", debt_symbol, best.debt_asset);
+    println!("export COLLATERAL_SYMBOL={} && \\", collateral_symbol);
+    println!(
+        "export {}={} && \\",
+        collateral_symbol, best.collateral_asset
+    );
+    println!("export USER_TO_LIQUIDATE={} && \\", user_address);
+    println!("export DEBT_AMOUNT={} && \\", best.actual_debt_to_liquidate);
+    println!(
+        "export PRICE_UPDATER={} && \\",
+        std::env::var("PRICE_UPDATE_FROM")
+            .unwrap_or_else(|_| "Couldn't read PRICE_UPDATE_FROM from env".to_string())
+    );
+    println!(
+        "export PRICE_UPDATE_TX_HASH={} && \\",
+        hex::encode(price_update_tx_hash.as_bytes()),
+    );
+    println!("export PRICE_UPDATE_BLOCK={} && \\", block_number - 1); // One less because forge will also replay the price update tx
+    println!(
+        "export COLLATERAL_TO_WETH_FEE={} && \\",
+        collateral_to_weth_fee.to_string()
+    );
+    println!(
+        "export WETH_TO_DEBT_FEE={} && \\",
+        weth_to_debt_fee.to_string()
+    );
+    println!("export BUILDER_BRIBE={} && \\", "0"); // TODO
+    println!("export FLASH_LOAN_SOURCE={} && \\", "1"); // TODO: Logic to determine this based on available liquidity: 1-Morpho, 2-AAVE
+    println!("forge test --match-test testLiquidation -vvvvv --gas-report");
+    println!("\n##################################################");
+}
+
+fn print_mevshare_simulation_instructions() {
+    println!("##################################################");
+    println!("🟢 Mevshare simulation command 🟢");
+    println!("---------------------------------\n");
+    println!("TBD");
+    println!("\n#########################################################");
+}
+
+fn print_liquidate_in_prod_instructions(
+    best: BestPair,
+    user_address: Address,
+    collateral_to_weth_fee: U24,
+    weth_to_debt_fee: U24,
+) {
+    println!("#########################################################");
+    println!("🚨🚨🚨 COMMAND FOR TRIGGERING LIQUIDATION IN PROD 🚨🚨🚨");
+    println!("---------------------------------------------------------\n");
+    println!(
+        "cast send --private-key $FOXDIE_PROD_PRIVATE_KEY --rpc-url $FLASHBOTS_RPC $FOXDIE_PROD_ADDRESS \"triggerLiquidation((uint256,address,address,address,uint24,uint24,uint16,uint8,uint256))((uint256,address,address,address,uint24,uint24,uint16,uint8,uint256))\" \"({},{},{},{},{},{},{},{},{})\"",
+        best.actual_debt_to_liquidate,      // debtAmount
+        user_address,                       // user
+        best.debt_asset,                    // debtAsset
+        best.collateral_asset,             // collateral
+        collateral_to_weth_fee.to_string(), // collateralToWethFee
+        weth_to_debt_fee.to_string(),      // wethToDebtFee
+        BRIBE_IN_BASIS_POINTS,             // bribePercentBps
+        1,                                 // flashLoanSource
+        0,                                 // aavePremium
+    );
+    println!("\n");
+}
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = env::args().collect();
@@ -522,62 +598,28 @@ async fn main() {
         let (collateral_to_weth_fee, weth_to_debt_fee) =
             calculate_best_swap_fees(provider.clone(), best.collateral_asset, best.debt_asset)
                 .await;
-
-        println!("\n### Foxdie ***TEST*** inputs ###");
-        println!("export DEBT_SYMBOL={} && \\", debt_symbol);
-        println!("export {}={} && \\", debt_symbol, best.debt_asset);
-        println!("export COLLATERAL_SYMBOL={} && \\", collateral_symbol);
-        println!(
-            "export {}={} && \\",
-            collateral_symbol, best.collateral_asset
-        );
-        println!("export USER_TO_LIQUIDATE={} && \\", user_address);
-        println!("export DEBT_AMOUNT={} && \\", best.actual_debt_to_liquidate);
-        println!(
-            "export PRICE_UPDATER={} && \\",
-            std::env::var("PRICE_UPDATE_FROM")
-                .unwrap_or_else(|_| "Couldn't read PRICE_UPDATE_FROM from env".to_string())
-        );
         let price_update_tx_hash = std::env::var("PRICE_UPDATE_TX")
             .ok()
             .and_then(|hash| hash.parse::<H256>().ok())
             .unwrap_or_else(|| H256::zero());
-        println!(
-            "export PRICE_UPDATE_TX_HASH={} && \\",
-            hex::encode(price_update_tx_hash.as_bytes()),
+        
+        print_foxdie_local_testing_instructions(
+            best.clone(),
+            &debt_symbol,
+            &collateral_symbol,
+            user_address,
+            block_number,
+            collateral_to_weth_fee,
+            weth_to_debt_fee,
+            price_update_tx_hash,
         );
-        println!("export PRICE_UPDATE_BLOCK={} && \\", block_number - 1); // One less because forge will also replay the price update tx
-        println!(
-            "export COLLATERAL_TO_WETH_FEE={} && \\",
-            collateral_to_weth_fee.to_string()
+        print_mevshare_simulation_instructions();
+        print_liquidate_in_prod_instructions(
+            best.clone(),
+            user_address,
+            collateral_to_weth_fee,
+            weth_to_debt_fee,
         );
-        println!(
-            "export WETH_TO_DEBT_FEE={} && \\",
-            weth_to_debt_fee.to_string()
-        );
-        println!("export BUILDER_BRIBE={} && \\", "0"); // TODO
-        println!("export FLASH_LOAN_SOURCE={} && \\", "1"); // TODO: Logic to determine this based on available liquidity: 1-Morpho, 2-AAVE
-        println!("forge test --match-test testLiquidation -vvvvv --gas-report");
-
-        // After your existing print statements, add:
-        println!("\n### Cast call command for triggerLiquidation ###");
-        println!(
-            "cast send --private-key {} --rpc-url http://localhost:8545 {} \"triggerLiquidation((uint256,address,address,address,uint24,uint24,uint16,uint8,uint256))((uint256,address,address,address,uint24,uint24,uint16,uint8,uint256))\" \"({},{},{},{},{},{},{},{},{})\"",
-            std::env::var("FOXDIE_OWNER_PK")
-                .unwrap_or_else(|_| "PRIVATE KEY NOT DEFINED".to_string()),
-            std::env::var("FOXDIE_ADDRESS")
-                .unwrap_or_else(|_| "FOXDIE ADDRESS NOT DEFINED".to_string()),
-            best.actual_debt_to_liquidate,      // debtAmount
-            user_address,                       // user
-            best.debt_asset,                    // debtAsset
-            best.collateral_asset,             // collateral
-            collateral_to_weth_fee.to_string(), // collateralToWethFee
-            weth_to_debt_fee.to_string(),      // wethToDebtFee
-            BRIBE_IN_BASIS_POINTS,             // bribePercentBps
-            1,                                 // flashLoanSource
-            0,                                 // aavePremium
-        );
-        println!("\n");
 
         if simulate_bundle {
             println!("\n### Simulating bundle execution with MevShare ###\n");
