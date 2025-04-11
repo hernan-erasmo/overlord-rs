@@ -456,9 +456,7 @@ impl UserReservesCache {
             .map(|chunk| chunk.to_vec())
             .collect();
         let bundle_processing_elapsed = bundle_processing.elapsed().as_millis();
-        let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
         info!(
-            timestamp = %now,
             trace_id = %bundle.unwrap().trace_id,
             processing_time_ms = bundle_processing_elapsed,
             total_candidates = duplicate_candidates.len(),
