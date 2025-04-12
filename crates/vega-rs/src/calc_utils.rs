@@ -17,7 +17,7 @@ const HF_MIN_THRESHOLD: u128 = 1_000_000_000_000_000_000u128;
 // > 1e10 ~ $10.xx to $99.xx
 // > 1e11 ~ $100.xx to $999.xx
 // > 1e12 ~ $1000.xx and above
-const MIN_REPORTABLE_COLLATERAL: f64 = 1e9;
+const MIN_REPORTABLE_COLLATERAL: f64 = 1e10;
 
 pub struct UnderwaterUserEventBus {
     sender: broadcast::Sender<UnderwaterUserEvent>,
