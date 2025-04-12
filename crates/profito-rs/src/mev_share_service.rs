@@ -1,11 +1,20 @@
 use ethers_core::{
-    k256::ecdsa::SigningKey, rand::thread_rng, types::{transaction::eip2718::TypedTransaction, H256}
+    k256::ecdsa::SigningKey,
+    rand::thread_rng,
+    types::{
+        Chain,
+        H256,
+        transaction::eip2718::TypedTransaction,
+        U64,
+    },
 };
 use ethers_signers::{LocalWallet, Signer, Wallet};
 use jsonrpsee::http_client::{transport::{Error as HttpError, HttpBackend}, HttpClient, HttpClientBuilder};
-use mev_share::rpc::{BundleItem, FlashbotsSigner, FlashbotsSignerLayer, MevApiClient, SendBundleRequest};
+use mev_share::rpc::{BundleItem, FlashbotsSigner, FlashbotsSignerLayer, Inclusion, MevApiClient, SendBundleRequest, SendBundleResponse};
 use once_cell::sync::OnceCell;
-use std::sync::Arc;
+use std::{
+    env, str::FromStr, sync::Arc
+};
 use tokio::sync::Mutex;
 use tower::{util::MapErr, ServiceBuilder};
 use tracing::info;
@@ -31,7 +40,7 @@ impl MevShareService {
     pub fn new() -> Self {
         Self {
             fb_signer: LocalWallet::new(&mut thread_rng()),
-            tx_signer: LocalWallet::new(&mut thread_rng()),
+            tx_signer: LocalWallet::from_str(&env::var("FOXDIE_OWNER_PK").unwrap()).unwrap().with_chain_id(Chain::Mainnet),
             initialization: Arc::new(Mutex::new(())),
         }
     }
@@ -70,30 +79,32 @@ impl MevShareService {
 
     pub async fn submit_simple_liquidation_bundle(
         &self,
-        pub_tx: H256,
+        pub_tx: String,
         foxdie_tx: TypedTransaction,
-        simulate: bool,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+        inclusion_block: String,
+    ) -> Result<SendBundleResponse, Box<dyn std::error::Error>> {
         let signature = self.tx_signer.sign_transaction(&foxdie_tx.clone().into()).await?;
         let bytes = foxdie_tx.rlp_signed(&signature);
         let bundle_body = vec![
-            BundleItem::Hash { hash: pub_tx },
+            BundleItem::Hash { hash: H256::from_str(&pub_tx).expect("(profito) Invalid transaction hash") },
             BundleItem::Tx { tx: bytes, can_revert: false },
         ];
+        let block = U64::from_str(&inclusion_block)?;
+        let max_block = block + U64::from(5u64);
         let bundle = SendBundleRequest {
-            bundle_body, ..Default::default()
+            bundle_body,
+            inclusion: Inclusion {
+                block,
+                max_block: Some(max_block),
+            },
+            ..Default::default()
         };
 
         let client = &*self.get_client().await?;
-        if simulate {
-            println!("Simulating bundle");
-            //let sim_res = MevApiClient::sim_bundle(client, bundle.clone(), Default::default()).await;
-            //info!("Got a simulation response: {:?}", sim_res);
-        } else {
-            println!("SENDING REAL BUNDLE");
-            //let send_res = MevApiClient::send_bundle(client, bundle.clone()).await;
-            //info!("Got a bundle response: {:?}", send_res);
+        info!("Sending bundle: {:?}", bundle);
+        match MevApiClient::send_bundle(client, bundle.clone()).await {
+            Ok(res) => Ok(res),
+            Err(e) => Err(format!("Error on send_bundle: {}", e).into())
         }
-        Ok(())
     }
 }
