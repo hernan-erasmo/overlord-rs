@@ -50,6 +50,8 @@ pub async fn get_hf_for_users(
     address_buckets: Vec<Vec<Address>>,
     provider: &RootProvider<PubSubFrontend>,
     trace_id: Option<String>,
+    tx_hash: Option<String>,
+    inclusion_block: Option<String>,
     new_prices_by_asset: Vec<(Address, String, U256)>,
     event_bus: Option<Arc<UnderwaterUserEventBus>>,
 ) -> HealthFactorCalculationResults {
@@ -59,11 +61,21 @@ pub async fn get_hf_for_users(
         provider.clone(),
     ));
     let trace_id = trace_id.clone();
+    let tx_hash = tx_hash.clone();
+    let inclusion_block = inclusion_block.clone();
     for bucket in address_buckets {
         let pool = pool.clone();
         let event_bus = event_bus.clone();
         let new_prices_by_asset = new_prices_by_asset.clone();
         let trace_id = trace_id
+            .as_ref()
+            .map(String::from)
+            .unwrap_or_else(|| String::from("initial-run"));
+        let tx_hash = tx_hash
+            .as_ref()
+            .map(String::from)
+            .unwrap_or_else(|| String::from("initial-run"));
+        let inclusion_block = inclusion_block
             .as_ref()
             .map(String::from)
             .unwrap_or_else(|| String::from("initial-run"));
@@ -78,6 +90,8 @@ pub async fn get_hf_for_users(
                                 bus.send(UnderwaterUserEvent {
                                     address,
                                     trace_id: trace_id.clone(),
+                                    tx_hash: tx_hash.clone(),
+                                    inclusion_block: inclusion_block.clone(),
                                     total_collateral_base: data.totalCollateralBase,
                                     user_account_data: data.clone(),
                                     new_asset_prices: new_prices_by_asset.clone(),
