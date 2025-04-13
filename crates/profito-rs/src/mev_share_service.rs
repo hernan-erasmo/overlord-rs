@@ -89,7 +89,7 @@ impl MevShareService {
             BundleItem::Hash { hash: H256::from_str(&pub_tx).expect("(profito) Invalid transaction hash") },
             BundleItem::Tx { tx: bytes, can_revert: false },
         ];
-        let block = U64::from_str(&inclusion_block)?;
+        let block = U64::from(inclusion_block.parse::<u64>()?);
         let max_block = block + U64::from(5u64);
         let bundle = SendBundleRequest {
             bundle_body,
