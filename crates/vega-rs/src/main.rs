@@ -314,6 +314,8 @@ async fn main() -> Result<(), String> {
         };
         match deserialized_message {
             MessageBundle::PriceUpdate(price_update) => {
+                let trace_id = Some(&price_update).map_or("initial-run".to_string(), |b| b.trace_id.clone());
+                info!("Vega received price update for trace_id {}", trace_id);
                 run_price_update_pipeline(
                     &mut user_reserves_cache,
                     Some(&price_update),
