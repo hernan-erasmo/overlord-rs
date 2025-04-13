@@ -2,7 +2,8 @@ use alloy::{
     eips::BlockNumberOrTag,
     network::TransactionBuilder,
     node_bindings::anvil::{Anvil, AnvilInstance},
-    providers::{IpcConnect, Provider, ProviderBuilder, RootProvider},
+    primitives::U256,
+    providers::{ext::AnvilApi, IpcConnect, Provider, ProviderBuilder, RootProvider},
     rpc::types::{Block, BlockId, BlockTransactionsKind, TransactionRequest},
 };
 use eyre::Result;
@@ -170,6 +171,20 @@ impl ForkProvider {
         };
         // Step 4: Apply the price update to the fork
         if let Some(bundle) = bundle {
+            // Step 4.0: Fund the account the tx comes from, to prevent failures when applying the tx
+            match fork_provider.as_ref().unwrap().anvil_set_balance(
+                bundle.tx_from,
+                U256::from(1e20),
+            ).await {
+                Ok(_) => {
+                    info!("Funded account {} for bundle {}", bundle.tx_from, trace_id);
+                }
+                Err(e) => {
+                    error!("Failed to fund account {} for bundle {}: {:?}", bundle.tx_from, trace_id, e);
+                    Self::cleanup_anvil_instance(&mut anvil);
+                    return Err("Failed to fund account".to_string());
+                }
+            }
             // Step 4.1: Build the price update tx
             let nonce = provider
                 .get_transaction_count(bundle.tx_from)
@@ -177,6 +192,7 @@ impl ForkProvider {
                 .unwrap();
             let forked_block_clone = block_to_be_forked.clone();
             let pub_tx = build_pub_tx(bundle, forked_block_clone, nonce).await;
+            info!("TX to send to fork for bundle {}: {:?}", trace_id, pub_tx);
             // Step 4.2: Send it to the fork
             let pending_tx = match fork_provider
                 .as_ref()
