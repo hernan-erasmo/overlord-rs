@@ -9,6 +9,7 @@ use alloy::{providers::RootProvider, pubsub::PubSubFrontend};
 use cache::{PriceCache, ProviderCache};
 use calculations::{get_best_liquidation_opportunity, get_reserves_list, get_reserves_data, calculate_user_account_data, calculate_best_swap_fees, calculate_bribe};
 use constants::*;
+use mev_share_service::MevShareService;
 use overlord_shared_types::UnderwaterUserEvent;
 use sol_bindings::AaveOracle;
 use std::sync::Arc;
@@ -16,7 +17,7 @@ use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use tracing_appender::rolling::{self, Rotation};
 use tracing_subscriber::fmt::{time::LocalTime, writer::BoxMakeWriter};
-use utils::get_user_reserves_data;
+use utils::{create_trigger_liquidation_tx, get_user_reserves_data};
 
 fn _setup_logging() {
     let log_file = rolling::RollingFileAppender::new(
@@ -36,6 +37,7 @@ async fn process_uw_event(
     uw_event: UnderwaterUserEvent,
     provider_cache: Arc<ProviderCache>,
     price_cache: Arc<tokio::sync::Mutex<PriceCache>>,
+    mev_share_client: Arc<MevShareService>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let provider = match provider_cache.get_provider().await {
         Ok(provider) => provider,
@@ -99,7 +101,6 @@ async fn process_uw_event(
     )
     .await
     {
-
         // these are not part of the profit calculation
         // they're here only for the purpose of submitting the appropriate parameters
         // to the liquidation function
@@ -115,6 +116,26 @@ async fn process_uw_event(
             best_pair.printable_net_profit,
             uw_event.total_collateral_base,
         );
+
+        let foxdie_tx = match create_trigger_liquidation_tx(best_pair,
+            uw_event.address,
+            collateral_to_weth_fee,
+            weth_to_debt_fee,
+            bribe,
+        ).await {
+            Ok(tx) => tx,
+            Err(e) => return Err(format!("Error creating foxdie tx: {}", e).into())
+        };
+        match mev_share_client.submit_simple_liquidation_bundle(
+            uw_event.tx_hash,
+            foxdie_tx,
+            uw_event.inclusion_block,
+        ).await {
+            Ok(res) => {
+                info!("Submitted bundle. Response: {:?}", res);
+            },
+            Err(e) => return Err(format!("Error processing uw event for bundle {}: {}", uw_event.trace_id, e).into())
+        };
     } else {
         warn!(
             "No profitable liquidation pair found for {}",
@@ -130,6 +151,7 @@ async fn main() {
     info!("Starting Profito RS");
     let provider_cache = Arc::new(ProviderCache::new());
     let price_cache = Arc::new(Mutex::new(PriceCache::new(3)));
+    let mev_share_client = Arc::new(MevShareService::new());
     let context = zmq::Context::new();
     let socket = context.socket(zmq::PULL).unwrap();
     if let Err(e) = socket.bind(PROFITO_INBOUND_ENDPOINT) {
@@ -146,6 +168,7 @@ async fn main() {
                 Ok(uw_event) => {
                     let provider_cache = provider_cache.clone();
                     let cloned_uw_event = uw_event.clone();
+                    let mev_share_client = mev_share_client.clone();
 
                     // Price cache needs to contain the new prices before processing the event
                     if !price_cache
@@ -161,6 +184,7 @@ async fn main() {
                             uw_event,
                             provider_cache,
                             price_cache,
+                            mev_share_client,
                         )
                         .await
                         {

@@ -438,7 +438,19 @@ async fn main() {
                                     continue;
                                 }
                             };
+                            let expected_block = match provider_clone.get_block_number().await {
+                                // When reading the block, the provider is going to return the last submitted block
+                                // that it's aware of, meaning that a pending tx is expected to land on block + 1
+                                // at the earliest
+                                Ok(block) => block + 1,
+                                Err(e) => {
+                                    warn!("Failed to get mempool block number: {e}");
+                                    u64::MIN
+                                }
+                            };
                             let bundle = PriceUpdateBundle {
+                                tx_hash: format!("{:?}", &tx_hash).to_string(),
+                                inclusion_block: format!("{}", &expected_block).to_string(),
                                 trace_id: format!("{:?}", &tx_hash)[2..10].to_string(),
                                 tx_new_price,
                                 forward_to,
@@ -459,13 +471,6 @@ async fn main() {
                                 Err(e) => {
                                     error!("Failed to send mempool bundle to Vega: {e}");
                                     continue;
-                                }
-                            };
-                            let expected_block = match provider_clone.get_block_number().await {
-                                Ok(block) => block + 1,
-                                Err(e) => {
-                                    warn!("Failed to get mempool block number: {e}");
-                                    u64::MIN
                                 }
                             };
                             info!(
@@ -510,8 +515,20 @@ async fn main() {
                                             continue;
                                         }
                                     };
+                                    let expected_block = match provider_clone.get_block_number().await {
+                                        // When reading the block, the provider is going to return the last submitted block
+                                        // that it's aware of, meaning that a pending tx is expected to land on block + 1
+                                        // at the earliest
+                                        Ok(block) => block + 1,
+                                        Err(e) => {
+                                            warn!("Failed to get block number: {e}");
+                                            u64::MIN
+                                        }
+                                    };
                                     let bundle = PriceUpdateBundle {
+                                        tx_hash: format!("{:?}", event.hash).to_string(),
                                         trace_id: format!("{:?}", event.hash)[2..10].to_string(),
+                                        inclusion_block: format!("{}", &expected_block).to_string(),
                                         tx_new_price,
                                         forward_to, // vega uses this to know which asset(s) the update is for
                                         tx_to: tx.to.unwrap(),
@@ -531,13 +548,6 @@ async fn main() {
                                         Err(e) => {
                                             error!("Failed to send bundle to Vega: {e}");
                                             continue;
-                                        }
-                                    };
-                                    let expected_block = match provider_clone.get_block_number().await {
-                                        Ok(block) => block + 1,
-                                        Err(e) => {
-                                            warn!("Failed to get block number: {e}");
-                                            u64::MIN
                                         }
                                     };
                                     info!(

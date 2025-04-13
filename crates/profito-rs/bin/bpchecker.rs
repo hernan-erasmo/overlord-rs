@@ -4,7 +4,8 @@ use alloy::{
     pubsub::PubSubFrontend,
 };
 use ethers_core::{
-    abi::{encode, ParamType, Token}, types::{transaction::eip2718::TypedTransaction, Eip1559TransactionRequest, H160, H256, U256 as ethersU256}, utils::{hex, keccak256}
+    types::H256,
+    utils::hex,
 };
 use profito_rs::{
     cache::PriceCache,
@@ -32,7 +33,6 @@ use profito_rs::{
         IUiPoolDataProviderV3::{AggregatedReserveData, UserReserveData},
     },
     utils::{ReserveConfigurationEnhancedData, generate_reserve_details_by_asset, get_user_reserves_data},
-    mev_share_service::MevShareService,
 };
 use std::{collections::HashMap, env, sync::Arc};
 use tokio::sync::Mutex;
@@ -406,14 +406,6 @@ fn print_foxdie_local_testing_instructions(
     println!("\n##################################################");
 }
 
-fn print_mevshare_simulation_instructions() {
-    println!("##################################################");
-    println!("🟢 Mevshare simulation command 🟢");
-    println!("---------------------------------\n");
-    println!("TBD");
-    println!("\n#########################################################");
-}
-
 fn print_liquidate_in_prod_instructions(
     best: BestPair,
     user_address: Address,
@@ -627,66 +619,12 @@ async fn main() {
             weth_to_debt_fee,
             price_update_tx_hash,
         );
-        print_mevshare_simulation_instructions();
         print_liquidate_in_prod_instructions(
             best.clone(),
             user_address,
             collateral_to_weth_fee,
             weth_to_debt_fee,
         );
-
-        if simulate_bundle {
-            println!("\n### Simulating bundle execution with MevShare ###\n");
-
-            let params = vec![
-                Token::Tuple(vec![
-                    Token::Uint(ethersU256::from_little_endian(&best.actual_debt_to_liquidate.to_le_bytes::<32>())),  // debtAmount
-                    Token::Address(H160::from_slice(user_address.as_slice())),    // user
-                    Token::Address(H160::from_slice(best.debt_asset.as_slice())), // debtAsset
-                    Token::Address(H160::from_slice(best.collateral_asset.as_slice())), // collateral
-                    Token::Uint(ethersU256::from(collateral_to_weth_fee.to::<u32>())), // collateralToWethFee
-                    Token::Uint(ethersU256::from(weth_to_debt_fee.to::<u32>())), // wethToDebtFee
-                    Token::Uint(ethersU256::from(1500)),               // bribePercentBps (15%)
-                    Token::Uint(ethersU256::from(1)),                  // flashLoanSource
-                    Token::Uint(ethersU256::from(0)),                  // aavePremium
-                ])
-            ];
-
-            let function_signature = "triggerLiquidation((uint256,address,address,address,uint24,uint24,uint16,uint8,uint256))";
-            let selector = &keccak256(function_signature.as_bytes())[0..4];
-            let param_types = vec![
-                ParamType::Tuple(vec![
-                    ParamType::Uint(256),  // debtAmount
-                    ParamType::Address,    // user
-                    ParamType::Address,    // debtAsset
-                    ParamType::Address,    // collateral
-                    ParamType::Uint(24),   // collateralToWethFee
-                    ParamType::Uint(24),   // wethToDebtFee
-                    ParamType::Uint(16),   // bribePercentBps
-                    ParamType::Uint(8),    // flashLoanSource
-                    ParamType::Uint(256),  // aavePremium
-                ])
-            ];
-            let encoded_params = encode(&params);
-            let encoded = [selector, &encoded_params].concat();
-            let contract_address = "0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF".parse::<H160>().unwrap();
-            let tx = Eip1559TransactionRequest::new()
-                //.from() will definitely be required
-                .to(contract_address)
-                .data(encoded.to_vec());
-            // TODO (Hernan) Figure out if these are required
-                //.gas(U256::from(1_000_000))
-                //.max_fee_per_gas(U256::from(100_000_000_000u64))
-                //.max_priority_fee_per_gas(U256::from(2_000_000_000u64));
-            let foxdie_tx = TypedTransaction::Eip1559(tx);
-            let mev_share_service = MevShareService::new();
-            mev_share_service.submit_simple_liquidation_bundle(
-                if price_update_tx_hash == H256::zero() { H256::random() } else { price_update_tx_hash },
-                foxdie_tx,
-                true,
-            ).await.unwrap();
-            println!("\n### End of simulation output ###\n");
-        }
     } else {
         println!("\tNo profitable liquidation opportunity found.");
     }

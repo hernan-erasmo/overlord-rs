@@ -1,15 +1,30 @@
+use crate::calculations::BestPair;
 use crate::sol_bindings::pool::AaveV3Pool;
+use crate::sol_bindings::Foxdie;
 
 use super::constants::*;
 use super::sol_bindings::{
     AaveProtocolDataProvider, GetReserveConfigurationDataReturn, IERC20Metadata, AaveUIPoolDataProvider, IUiPoolDataProviderV3::UserReserveData,
 };
-use alloy::primitives::{Address, U256};
+use alloy::primitives::{Address, aliases::U24, U256};
 use alloy::providers::RootProvider;
 
 use alloy::pubsub::PubSubFrontend;
-use std::collections::HashMap;
-use std::sync::Arc;
+use ethers_core::{
+    abi::{encode, Token},
+    types::{
+        Eip1559TransactionRequest,
+        H160,
+        U256 as ethersU256,
+        transaction::eip2718::TypedTransaction
+    },
+    utils::keccak256,
+};
+use std::{
+    collections::HashMap,
+    env,
+    sync::Arc,
+};
 
 #[derive(Debug, Clone)]
 pub struct ReserveConfigurationEnhancedData {
@@ -124,4 +139,54 @@ pub async fn generate_reserve_details_by_asset(
         );
     }
     Ok(configuration_data)
+}
+
+pub async fn create_trigger_liquidation_tx(
+    best: BestPair,
+    user_address: Address,
+    collateral_to_weth_fee: U24,
+    weth_to_debt_fee: U24,
+    bribe: U256,
+) -> Result<TypedTransaction, Box<dyn std::error::Error>> {
+    let params = vec![
+        Token::Tuple(vec![
+            Token::Uint(ethersU256::from_little_endian(&best.actual_debt_to_liquidate.to_le_bytes::<32>())),  // debtAmount
+            Token::Address(H160::from_slice(user_address.as_slice())),          // user
+            Token::Address(H160::from_slice(best.debt_asset.as_slice())),       // debtAsset
+            Token::Address(H160::from_slice(best.collateral_asset.as_slice())), // collateral
+            Token::Uint(ethersU256::from(collateral_to_weth_fee.to::<u32>())),  // collateralToWethFee
+            Token::Uint(ethersU256::from(weth_to_debt_fee.to::<u32>())),        // wethToDebtFee
+            Token::Uint(ethersU256::from(bribe.to::<u16>())),                   // bribePercentBps
+            Token::Uint(ethersU256::from(best.flash_loan_source as u8)),        // flashLoanSource
+            Token::Uint(ethersU256::from(0)),                                   // aavePremium
+        ])
+    ];
+
+    let function_signature = "triggerLiquidation((uint256,address,address,address,uint24,uint24,uint16,uint8,uint256))";
+    let selector = &keccak256(function_signature.as_bytes())[0..4];
+    let encoded_params = encode(&params);
+    let encoded = [selector, &encoded_params].concat();
+    let foxdie_owner = match &env::var("FOXDIE_OWNER") {
+        Ok(addr_str) => {
+            match addr_str.parse::<H160>() {
+                Ok(addr) => addr,
+                Err(e) => return Err(format!("Couldn't convert FOXDIE_OWNER value into formal address: {}", e).into())
+            }
+        },
+        Err(e) => return Err(format!("Couldn't read FOXDIE_OWNER environment value: {}", e).into())
+    };
+    let foxdie_address = match &env::var("FOXDIE_ADDRESS") {
+        Ok(addr_str) => {
+            match addr_str.parse::<H160>() {
+                Ok(addr) => addr,
+                Err(e) => return Err(format!("Couldn't convert FOXDIE_ADDRESS value into formal address: {}", e).into())
+            }
+        },
+        Err(e) => return Err(format!("Couldn't read FOXDIE_ADDRESS environment value: {}", e).into())
+    };
+    let tx = Eip1559TransactionRequest::new()
+        .from(foxdie_owner)
+        .to(foxdie_address)
+        .data(encoded.to_vec());
+    Ok(TypedTransaction::Eip1559(tx))
 }
