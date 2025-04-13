@@ -1,5 +1,6 @@
 use crate::calculations::BestPair;
 use crate::sol_bindings::pool::AaveV3Pool;
+use crate::sol_bindings::Foxdie;
 
 use super::constants::*;
 use super::sol_bindings::{
@@ -145,18 +146,19 @@ pub async fn create_trigger_liquidation_tx(
     user_address: Address,
     collateral_to_weth_fee: U24,
     weth_to_debt_fee: U24,
+    bribe: U256,
 ) -> Result<TypedTransaction, Box<dyn std::error::Error>> {
     let params = vec![
         Token::Tuple(vec![
             Token::Uint(ethersU256::from_little_endian(&best.actual_debt_to_liquidate.to_le_bytes::<32>())),  // debtAmount
-            Token::Address(H160::from_slice(user_address.as_slice())),    // user
-            Token::Address(H160::from_slice(best.debt_asset.as_slice())), // debtAsset
+            Token::Address(H160::from_slice(user_address.as_slice())),          // user
+            Token::Address(H160::from_slice(best.debt_asset.as_slice())),       // debtAsset
             Token::Address(H160::from_slice(best.collateral_asset.as_slice())), // collateral
-            Token::Uint(ethersU256::from(collateral_to_weth_fee.to::<u32>())), // collateralToWethFee
-            Token::Uint(ethersU256::from(weth_to_debt_fee.to::<u32>())), // wethToDebtFee
-            Token::Uint(ethersU256::from(1500)),               // bribePercentBps (15%)
-            Token::Uint(ethersU256::from(1)),                  // flashLoanSource
-            Token::Uint(ethersU256::from(0)),                  // aavePremium
+            Token::Uint(ethersU256::from(collateral_to_weth_fee.to::<u32>())),  // collateralToWethFee
+            Token::Uint(ethersU256::from(weth_to_debt_fee.to::<u32>())),        // wethToDebtFee
+            Token::Uint(ethersU256::from(bribe.to::<u16>())),                   // bribePercentBps
+            Token::Uint(ethersU256::from(best.flash_loan_source as u8)),        // flashLoanSource
+            Token::Uint(ethersU256::from(0)),                                   // aavePremium
         ])
     ];
 

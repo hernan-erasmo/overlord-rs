@@ -101,7 +101,6 @@ async fn process_uw_event(
     )
     .await
     {
-
         // these are not part of the profit calculation
         // they're here only for the purpose of submitting the appropriate parameters
         // to the liquidation function
@@ -118,7 +117,12 @@ async fn process_uw_event(
             uw_event.total_collateral_base,
         );
 
-        let foxdie_tx = match create_trigger_liquidation_tx(best_pair, uw_event.address, collateral_to_weth_fee, weth_to_debt_fee).await {
+        let foxdie_tx = match create_trigger_liquidation_tx(best_pair,
+            uw_event.address,
+            collateral_to_weth_fee,
+            weth_to_debt_fee,
+            bribe,
+        ).await {
             Ok(tx) => tx,
             Err(e) => return Err(format!("Error creating foxdie tx: {}", e).into())
         };
