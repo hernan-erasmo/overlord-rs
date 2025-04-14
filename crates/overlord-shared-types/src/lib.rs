@@ -1,7 +1,4 @@
-use alloy::{
-    primitives::{Address, Bytes, U256},
-    sol,
-};
+use alloy::primitives::{Address, Bytes, U256};
 use serde::{Deserialize, Serialize};
 
 pub mod sol_bindings;
