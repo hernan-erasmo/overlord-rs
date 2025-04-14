@@ -25,28 +25,13 @@ use std::{
 use tokio::{sync::RwLock, task, time::Instant};
 use tracing::{error, info, warn};
 
+use overlord_shared_types::sol_bindings::{
+    pool::AaveV3Pool,
+    AaveUIPoolDataProvider,
+};
 use vega_rs::user_reserve_cache::{
     get_positions_by_user, load_addresses_from_file, UserPosition, generate_user_by_position_by_asset, PositionType
 };
-
-sol!(
-    #[allow(missing_docs)]
-    #[allow(clippy::too_many_arguments)]
-    #[sol(rpc)]
-    AaveUIPoolDataProvider,
-    "src/abis/aave_ui_pool_data_provider.json"
-);
-
-pub mod pool {
-    use alloy::sol;
-    sol!(
-        #[allow(missing_docs)]
-        #[allow(clippy::too_many_arguments)]
-        #[sol(rpc)]
-        AaveV3Pool,
-        "src/abis/aave_v3_pool.json"
-    );
-}
 
 pub type UserAddress = Address;
 type ReserveAddress = Address;

@@ -2,12 +2,18 @@ use alloy::{
     primitives::{address, Address, U256},
     providers::{IpcConnect, ProviderBuilder, RootProvider},
     pubsub::PubSubFrontend,
-    sol,
 };
 use chrono::Local;
 use futures::future::join_all;
-use overlord_shared_types::{PriceUpdateBundle, WhistleblowerEventType, WhistleblowerUpdate};
-use pool::AaveV3Pool;
+use overlord_shared_types::{
+    PriceUpdateBundle,
+    sol_bindings::{
+        AaveUIPoolDataProvider,
+        pool::AaveV3Pool,
+    },
+    WhistleblowerEventType,
+    WhistleblowerUpdate
+};
 use serde_json::json;
 use std::collections::HashSet;
 use std::fs::OpenOptions;
@@ -21,25 +27,6 @@ use std::{
 };
 use tokio::{sync::RwLock, task, time::Instant};
 use tracing::{error, info, warn};
-
-sol!(
-    #[allow(missing_docs)]
-    #[allow(clippy::too_many_arguments)]
-    #[sol(rpc)]
-    AaveUIPoolDataProvider,
-    "src/abis/aave_ui_pool_data_provider.json"
-);
-
-pub mod pool {
-    use alloy::sol;
-    sol!(
-        #[allow(missing_docs)]
-        #[allow(clippy::too_many_arguments)]
-        #[sol(rpc)]
-        AaveV3Pool,
-        "src/abis/aave_v3_pool.json"
-    );
-}
 
 type UserAddress = Address;
 type ReserveAddress = Address;
