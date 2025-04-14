@@ -2,7 +2,6 @@ mod cache;
 mod calculations;
 mod constants;
 mod mev_share_service;
-pub mod sol_bindings;
 mod utils;
 
 use alloy::{providers::RootProvider, pubsub::PubSubFrontend};
@@ -10,8 +9,10 @@ use cache::{PriceCache, ProviderCache};
 use calculations::{get_best_liquidation_opportunity, get_reserves_list, get_reserves_data, calculate_user_account_data, calculate_best_swap_fees, calculate_bribe};
 use constants::*;
 use mev_share_service::MevShareService;
-use overlord_shared_types::UnderwaterUserEvent;
-use sol_bindings::AaveOracle;
+use overlord_shared_types::{
+    sol_bindings::AaveOracle,
+    UnderwaterUserEvent
+};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};

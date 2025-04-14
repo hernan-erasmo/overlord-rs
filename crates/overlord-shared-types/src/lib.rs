@@ -4,14 +4,8 @@ use alloy::{
 };
 use serde::{Deserialize, Serialize};
 
-sol!(
-    #[allow(missing_docs)]
-    #[allow(clippy::too_many_arguments)]
-    #[derive(serde::Serialize, serde::Deserialize)]
-    #[sol(rpc)]
-    AaveV3Pool,
-    "src/abis/aave_v3_pool.json"
-);
+pub mod sol_bindings;
+use sol_bindings::pool::AaveV3Pool;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct UnderwaterUserEvent {

@@ -1,11 +1,15 @@
 use crate::calculations::BestPair;
-use crate::sol_bindings::pool::AaveV3Pool;
-use crate::sol_bindings::Foxdie;
+
+use overlord_shared_types::sol_bindings::{
+    AaveProtocolDataProvider, 
+    AaveUIPoolDataProvider,
+    GetReserveConfigurationDataReturn,
+    IERC20Metadata,
+    IUiPoolDataProviderV3::UserReserveData,
+    pool::AaveV3Pool,
+};
 
 use super::constants::*;
-use super::sol_bindings::{
-    AaveProtocolDataProvider, GetReserveConfigurationDataReturn, IERC20Metadata, AaveUIPoolDataProvider, IUiPoolDataProviderV3::UserReserveData,
-};
 use alloy::primitives::{Address, aliases::U24, U256};
 use alloy::providers::RootProvider;
 
