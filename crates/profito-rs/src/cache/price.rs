@@ -1,9 +1,9 @@
-use super::super::sol_bindings::AaveOracle;
 use alloy::{
     primitives::{Address, U256},
     providers::RootProvider,
     pubsub::PubSubFrontend,
 };
+use overlord_shared_types::sol_bindings::AaveOracle;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     sync::Arc,

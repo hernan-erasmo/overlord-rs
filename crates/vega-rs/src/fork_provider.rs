@@ -207,8 +207,8 @@ impl ForkProvider {
                     return Err("Failed to send price update tx to fork".to_string());
                 }
             };
-            // Step 4.3: Get the price updat tx receipt
-            let tx_receipt = match pending_tx.get_receipt().await {
+            // Step 4.3: Get the price update tx receipt
+            match pending_tx.get_receipt().await {
                 Ok(receipt) => receipt,
                 Err(e) => {
                     error!("Failed to get receipt for price update tx for bundle {}: {:?}", trace_id, e);

@@ -13,23 +13,24 @@ use alloy::{
     providers::{Provider, RootProvider},
     pubsub::PubSubFrontend,
 };
+use overlord_shared_types::sol_bindings::{
+    AaveOracle,
+    IUiPoolDataProviderV3::{
+        AggregatedReserveData,
+        UserReserveData
+    },
+    IAToken,
+    ERC20,
+    pool::AaveV3Pool,
+    AaveUIPoolDataProvider,
+    AaveProtocolDataProvider,
+    UniswapV3Pool,
+    UniswapV3Factory,
+    Foxdie,
+};
 use std::sync::Arc;
 
-use super::{
-    cache::PriceCache,
-    sol_bindings::{
-        AaveOracle,
-        IUiPoolDataProviderV3::{AggregatedReserveData, UserReserveData},
-        IAToken,
-        ERC20,
-        pool::AaveV3Pool,
-        AaveUIPoolDataProvider,
-        AaveProtocolDataProvider,
-        UniswapV3Pool,
-        UniswapV3Factory,
-        Foxdie,
-    }
-};
+use super::cache::PriceCache;
 use tracing::warn;
 
 pub const BRIBE_IN_BASIS_POINTS: u16 = 5000; // 50%

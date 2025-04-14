@@ -2,11 +2,18 @@ use alloy::{
     primitives::{address, Address, U256},
     providers::{IpcConnect, ProviderBuilder, RootProvider},
     pubsub::PubSubFrontend,
-    sol,
 };
 use chrono::Local;
 use futures::future::join_all;
-use overlord_shared_types::{PriceUpdateBundle, WhistleblowerEventType, WhistleblowerUpdate};
+use overlord_shared_types::{
+    PriceUpdateBundle,
+    sol_bindings::{
+        AaveUIPoolDataProvider,
+        pool::AaveV3Pool,
+    },
+    WhistleblowerEventType,
+    WhistleblowerUpdate
+};
 use serde_json::json;
 use std::collections::HashSet;
 use std::fs::OpenOptions;
@@ -21,14 +28,6 @@ use std::{
 use tokio::{sync::RwLock, task, time::Instant};
 use tracing::{error, info, warn};
 
-sol!(
-    #[allow(missing_docs)]
-    #[allow(clippy::too_many_arguments)]
-    #[sol(rpc)]
-    AaveUIPoolDataProvider,
-    "src/abis/aave_ui_pool_data_provider.json"
-);
-
 type UserAddress = Address;
 type ReserveAddress = Address;
 type ChainlinkContractAddress = Address;
@@ -36,6 +35,7 @@ type ChainlinkContractAddress = Address;
 const AAVE_V3_PROVIDER_ADDRESS: Address = address!("2f39d218133afab8f2b819b1066c7e434ad94e9e");
 const AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS: Address =
     address!("3f78bbd206e4d3c504eb854232eda7e47e9fd8fc");
+const AAVE_V3_POOL: Address = address!("87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2");
 const BUCKETS: usize = 64;
 
 #[derive(Debug, Eq, PartialEq, Hash)]
@@ -161,6 +161,7 @@ impl UserReservesCache {
     }
 
     /// This function
+    /// 0. calls getUserAccountData for the given user address. If the user has no debt, we don't care about them.
     /// 1. calls getUserReservesData for the given user address
     /// 2. parses the result into a list of UserPosition
     /// 3. for each UserPosition, it updates the cache by adding the user to the list of users that are borrowing
@@ -181,9 +182,21 @@ impl UserReservesCache {
         };
         let ui_data =
             AaveUIPoolDataProvider::new(AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, provider.clone());
+        let aave_pool = AaveV3Pool::new(AAVE_V3_POOL, provider.clone());
         #[allow(unused_assignments)]
         let mut user_positions: Vec<UserPosition> = vec![];
         info!("Getting reserve data information for user {}", user_address);
+        let has_debt = match aave_pool.getUserAccountData(user_address).call().await {
+            Ok(data) => data.totalDebtBase > U256::ZERO,
+            Err(e) => {
+                warn!("Couldn't get user account data for update: {:?}", e);
+                return Err(e.into());
+            }
+        };
+        if !has_debt {
+            info!("User {} has no debt, skipping cache update", user_address);
+            return Ok(());
+        }
         let result = ui_data
             .getUserReservesData(AAVE_V3_PROVIDER_ADDRESS, user_address)
             .call()
@@ -555,11 +568,24 @@ async fn get_positions_by_user(
     let mut tasks = vec![];
     let ui_data =
         AaveUIPoolDataProvider::new(AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, provider.clone());
+    let aave_pool = AaveV3Pool::new(AAVE_V3_POOL, provider.clone());
     for bucket in address_buckets.iter().cloned() {
         let ui_data = ui_data.clone();
+        let aave_pool = aave_pool.clone();
         let task = task::spawn(async move {
             let mut results: HashMap<UserAddress, Vec<UserPosition>> = HashMap::new();
             for address in bucket {
+                // First check if user has any debt
+                let has_debt = match aave_pool.getUserAccountData(address).call().await {
+                    Ok(data) => data.totalDebtBase > U256::ZERO,
+                    Err(e) => {
+                        warn!("Couldn't get user account data: {:?}", e);
+                        false
+                    },
+                };
+                if !has_debt {
+                    continue;
+                }
                 // returns (UserReserveData[] memory, uint8)
                 let result = ui_data
                     .getUserReservesData(AAVE_V3_PROVIDER_ADDRESS, address)

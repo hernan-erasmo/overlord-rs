@@ -7,6 +7,12 @@ use ethers_core::{
     types::H256,
     utils::hex,
 };
+use overlord_shared_types::sol_bindings::{
+    pool::AaveV3Pool,
+    AaveOracle, AaveProtocolDataProvider,
+    Foxdie,
+    IUiPoolDataProviderV3::{AggregatedReserveData, UserReserveData},
+};
 use profito_rs::{
     cache::PriceCache,
     calculations::{
@@ -25,12 +31,6 @@ use profito_rs::{
     },
     constants::{
         AAVE_ORACLE_ADDRESS, AAVE_V3_POOL_ADDRESS, AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS,
-    },
-    sol_bindings::{
-        pool::AaveV3Pool,
-        AaveOracle, AaveProtocolDataProvider,
-        Foxdie,
-        IUiPoolDataProviderV3::{AggregatedReserveData, UserReserveData},
     },
     utils::{ReserveConfigurationEnhancedData, generate_reserve_details_by_asset, get_user_reserves_data},
 };
@@ -435,12 +435,11 @@ async fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() <= 2 {
-        eprintln!("Usage: {} <address> [path_to_ipc] [simulate_bundle]", args[0]);
+        eprintln!("Usage: {} <address> [path_to_ipc]", args[0]);
         std::process::exit(1);
     }
 
     let ipc_path = args.get(2).map_or("/tmp/reth.ipc", |path| path.as_str());
-    let simulate_bundle = args.get(3).is_some();
 
     let user_address: Address = args[1].parse().expect("Invalid address format");
 

@@ -29,16 +29,12 @@ PROVIDER_URL="/tmp/reth.ipc"
 
 # Initialize variables with default values
 PROVIDER_URL="/tmp/reth.ipc"
-export SIMULATE_MEVSHARE=false
 
 # Process optional flags (4th and 5th arguments)
 for arg in "${@:4}"; do
     case "$arg" in
         --use-third-party-provider)
             PROVIDER_URL="https://eth-mainnet.g.alchemy.com/v2/f48E9HLwDQTbfaoDutz9P07TqfugqApS"
-            ;;
-        --simulate)
-            export SIMULATE_MEVSHARE=true
             ;;
     esac
 done
@@ -139,6 +135,6 @@ if [ -n "$TX_HASH" ]; then
 fi
 
 echo "Running bpchecker with user_address: $USER_ADDRESS, ipc_file: $ANVIL_IPC"
-export PRICE_UPDATE_FROM=$PRICE_UPDATE_FROM && export PRICE_UPDATE_TX=$PRICE_UPDATE_TX && ./target/release/bpchecker "$USER_ADDRESS" "$ANVIL_IPC" $([ "$SIMULATE_MEVSHARE" = true ] && echo "--simulate")
+export PRICE_UPDATE_FROM=$PRICE_UPDATE_FROM && export PRICE_UPDATE_TX=$PRICE_UPDATE_TX && ./target/release/bpchecker "$USER_ADDRESS" "$ANVIL_IPC"
 
 echo "Done!"

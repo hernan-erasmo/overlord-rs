@@ -4,7 +4,10 @@ use alloy::{
     pubsub::PubSubFrontend,
 };
 use futures::future::join_all;
-use overlord_shared_types::{AaveV3Pool, UnderwaterUserEvent};
+use overlord_shared_types::{
+    sol_bindings::pool::AaveV3Pool,
+    UnderwaterUserEvent
+};
 use std::{collections::HashMap, sync::Arc};
 use tokio::{sync::broadcast, task};
 use tracing::warn;
