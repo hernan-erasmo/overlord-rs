@@ -79,7 +79,6 @@ impl EventProcessor for LiquidationCallProcessor {
         } = decoded.inner.data;
 
         info!(
-            liquidator = ?liquidator,
             block = ?block_number,
             collateral_asset = %collateralAsset,
             debt_asset = %debtAsset,
