@@ -148,7 +148,7 @@ pub async fn has_any_collateral_above_threshold(
     user_address: Address,
     user_positions: Vec<UserPosition>,
     min_collateral_in_usd: f64,
-) -> Result<f64, Box<dyn std::error::Error>> {
+) -> Result<bool, Box<dyn std::error::Error>> {
     // This should be something that we query only once, and make available for other services via shared memory, IPC or whatever
     let reserves_data = get_reserves_data(provider.clone()).await?;
     let reserves_data = reserves_data
@@ -161,14 +161,13 @@ pub async fn has_any_collateral_above_threshold(
         })
         .collect::<HashMap<_, _>>();
 
-    let mut highest_bonus = 0.0;
     let collateral_positions = user_positions
         .into_iter()
         .filter(|p| p.scaled_atoken_balance > U256::ZERO && p.usage_as_collateral_enabled_on_user)
         .collect::<Vec<UserPosition>>();
     if collateral_positions.len() == 0 {
-        //println!("No (usable) collateral positions found");
-        return Ok(0.0);
+        println!("No (usable) collateral positions found");
+        return Ok(false);
     }
     for position in collateral_positions {
         // get the aToken balance for the underlying asset
@@ -177,7 +176,7 @@ pub async fn has_any_collateral_above_threshold(
         let a_token_balance = match a_token_contract.balanceOf(user_address).call().await {
             Ok(balance) => balance.balance,
             Err(e) => {
-                //println!("Error trying to call balanceOf: {}", e);
+                eprintln!("Error trying to call balanceOf: {}", e);
                 U256::ZERO
             }
         };
@@ -198,30 +197,34 @@ pub async fn has_any_collateral_above_threshold(
             .decimals;
 
         let symbol = reserves_data.get(&position.underlying_asset).unwrap().symbol.clone();
-        //println!("Profit potential for {}:", symbol);
+        println!("Profit potential for {}:", symbol);
 
         let a_token_balance_in_asset_units = f64::from(a_token_balance) / f64::from(10).powi(decimals.try_into().unwrap_or(0));
         let raw = a_token_balance.as_limbs()[0] as f64; // Get the lowest limb which is u64, then convert to f64
         let token_units = raw / 10f64.powi(decimals.try_into().unwrap_or(0));       // normalize the token amount
         let a_token_balance_in_usd = token_units * (price.to::<u128>() as f64 / 1e8);     // multiply by price, normalize 8 decimals
-        //println!("\taToken balance = {}, in asset units = {}, in USD = ${}", a_token_balance, a_token_balance_in_asset_units, a_token_balance_in_usd);
+        println!("\taToken balance = {}, in asset units = {}, in USD = ${}",
+            a_token_balance,
+            a_token_balance_in_asset_units,
+            a_token_balance_in_usd,
+        );
 
         // In normal operation, AAVE applies the liquidation bonus on top of the max available collateral to liquidate
         // for this filter, we apply it on top of the whole user collateral, assuming that if it's not above the profit
         // threshold, then it won't be above the profit threshold with max collateral to liquidate either, and thus discard the user
         let bonus_fraction = (f64::from(liquidation_bonus) - 10000.0) / 100.0;
         let bonus_in_usd = a_token_balance_in_usd * f64::from(bonus_fraction) / 100.0;
-        //println!("\tLiquidation bonus in USD ({}% of ${}) = ${}", bonus_fraction, a_token_balance_in_usd, bonus_in_usd );
-        /*
+        println!("\tLiquidation bonus in USD ({}% of ${}) = ${}",
+            bonus_fraction,
+            a_token_balance_in_usd,
+            bonus_in_usd,
+        );
+
         if bonus_in_usd >= min_collateral_in_usd {
             return Ok(true)
         };
-        */
-        if bonus_in_usd > highest_bonus {
-            highest_bonus = bonus_in_usd;
-        }
     };
-    Ok(highest_bonus)
+    Ok(false)
 }
 
 #[tokio::main]
@@ -260,10 +263,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let min_collateral_in_usd = 0.04 as f64;
-    let highest_collateral = match has_any_collateral_above_threshold(provider, user_address, user_positions, min_collateral_in_usd).await {
+    let min_collateral_in_usd = 1.5 as f64;
+    let verdict = match has_any_collateral_above_threshold(provider, user_address, user_positions, min_collateral_in_usd).await {
         Ok(res) => res,
         Err(e) => return Err(format!("Error calculating has_any_collateral_above_threshold: {}", e).into())
     };
+    if verdict {
+        println!("The user should've been included in the cache");
+    } else {
+        println!("The user didn't have any collateral above threshold. DO NOT INLCUDE.");
+    }
     Ok(())
 }
