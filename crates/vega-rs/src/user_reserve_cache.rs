@@ -712,7 +712,12 @@ async fn get_positions_by_user(
                             })
                             .collect();
                         // Then check if any collateral is above threshold
-                        let above_threshold = match has_any_collateral_above_threshold(provider.clone(), address, user_positions.clone(), MIN_COLLATERAL_THRESHOLD_IN_USD).await {
+                        let above_threshold = match has_any_collateral_above_threshold(
+                            provider.clone(),
+                            address,
+                            user_positions.clone(),
+                            MIN_COLLATERAL_THRESHOLD_IN_USD
+                        ).await {
                             Ok(res) => res,
                             Err(e) => continue,
                         };

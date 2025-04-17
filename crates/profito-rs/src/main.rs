@@ -72,7 +72,7 @@ async fn process_uw_event(
     };
 
     let (
-        total_collateral_in_base_currency,
+        _total_collateral_in_base_currency,
         total_debt_in_base_currency,
         health_factor_v33
     ) = match calculate_user_account_data(
@@ -129,6 +129,7 @@ async fn process_uw_event(
         };
         match mev_share_client.submit_simple_liquidation_bundle(
             uw_event.tx_hash,
+            uw_event.raw_tx,
             foxdie_tx,
             uw_event.inclusion_block,
         ).await {

@@ -54,6 +54,7 @@ async fn run_price_update_pipeline(
     let (address_buckets, affected_reserves) = cache.get_candidates_for_bundle(bundle).await;
     let trace_id = bundle.map_or("initial-run".to_string(), |b| b.trace_id.clone());
     let tx_hash = bundle.map_or("initial-run".to_string(), |b| b.tx_hash.clone());
+    let raw_tx = bundle.map_or(None, |b| b.raw_tx.clone());
     let inclusion_block = bundle.map_or("initial-run".to_string(), |b| b.inclusion_block.clone());
     if address_buckets.len() == 1 && address_buckets[0].is_empty() {
         info!("Not processing bundle for trace_id {} because it doesn't contain any addresses", trace_id);
@@ -81,6 +82,7 @@ async fn run_price_update_pipeline(
         fork_provider.fork_provider.as_ref().unwrap(),
         Some(trace_id.clone()),
         Some(tx_hash.clone()),
+        raw_tx.clone(),
         Some(inclusion_block.clone()),
         new_prices_by_asset,
         Some(event_bus),
@@ -146,6 +148,7 @@ async fn _dump_initial_hf_results(
         get_hf_for_users(
             user_buckets,
             &provider,
+            None,
             None,
             None,
             None,
