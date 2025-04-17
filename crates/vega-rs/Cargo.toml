@@ -3,6 +3,10 @@ name = "vega-rs"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "collateral_filtering"
+path = "bin/collateral_filtering.rs"
+
 [dependencies]
 alloy.workspace = true
 bincode.workspace = true

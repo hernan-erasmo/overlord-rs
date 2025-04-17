@@ -8,14 +8,17 @@ use futures::future::join_all;
 use overlord_shared_types::{
     PriceUpdateBundle,
     sol_bindings::{
+        AaveOracle,
         AaveUIPoolDataProvider,
+        ERC20,
+        IUiPoolDataProviderV3::AggregatedReserveData,
         pool::AaveV3Pool,
     },
     WhistleblowerEventType,
     WhistleblowerUpdate
 };
 use serde_json::json;
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::{
@@ -32,6 +35,8 @@ type UserAddress = Address;
 type ReserveAddress = Address;
 type ChainlinkContractAddress = Address;
 
+const MIN_COLLATERAL_THRESHOLD_IN_USD: f64 = 6.0;
+pub const AAVE_ORACLE_ADDRESS: Address = address!("0x54586bE62E3c3580375aE3723C145253060Ca0C2");
 const AAVE_V3_PROVIDER_ADDRESS: Address = address!("2f39d218133afab8f2b819b1066c7e434ad94e9e");
 const AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS: Address =
     address!("3f78bbd206e4d3c504eb854232eda7e47e9fd8fc");
@@ -44,7 +49,7 @@ enum PositionType {
     Collateral,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct UserPosition {
     scaled_atoken_balance: U256,
     usage_as_collateral_enabled_on_user: bool,
@@ -543,6 +548,107 @@ fn load_chainlink_addresses(
     Ok(chainlink_addresses)
 }
 
+pub async fn get_reserves_data(provider: Arc<RootProvider<PubSubFrontend>>) -> Result<Vec<AggregatedReserveData>, Box<dyn std::error::Error>> {
+    /*
+       According to https://github.com/aave-dao/aave-v3-origin/blob/a0512f8354e97844a3ed819cf4a9a663115b8e20/src/contracts/helpers/UiPoolDataProviderV3.sol#L45
+       the reserves data is ordered the same way as the reserves list (it actually calls pool.getReservesList() and uses it as index)
+    */
+    match AaveUIPoolDataProvider::new(AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, provider.clone())
+        .getReservesData(AAVE_V3_PROVIDER_ADDRESS)
+        .call()
+        .await
+    {
+        Ok(reserves_data) => Ok(reserves_data._0),
+        Err(e) => Err(format!("Error trying to call getReservesData: {}", e).into())
+    }
+}
+
+async fn get_asset_price(provider: Arc<RootProvider<PubSubFrontend>>, asset: Address) -> U256 {
+    let aave_oracle = AaveOracle::new(AAVE_ORACLE_ADDRESS, provider.clone());
+    match aave_oracle.getAssetPrice(asset).call().await {
+        Ok(price_response) => price_response._0,
+        Err(e) => {
+            eprintln!("Error trying to call getAssetPrice: {}", e);
+            U256::ZERO
+        }
+    }
+}
+
+/// Remember collateral filtering is all about collateral, not debt
+/// By the point this function is called and given a list of users, we already
+/// know they have debt against the protocol, so only focus on collateral filtering
+/// conditions.
+pub async fn has_any_collateral_above_threshold(
+    provider: RootProvider<PubSubFrontend>,
+    user_address: Address,
+    user_positions: Vec<UserPosition>,
+    min_collateral_in_usd: f64,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let provider = Arc::new(provider.clone());
+    // This should be something that we query only once, and make available for other services via shared memory, IPC or whatever
+    let reserves_data = get_reserves_data(provider.clone()).await?;
+    let reserves_data = reserves_data
+        .into_iter()
+        .map(|d| {
+            (
+                d.underlyingAsset,
+                d,
+            )
+        })
+        .collect::<HashMap<_, _>>();
+
+    let collateral_positions = user_positions
+        .into_iter()
+        .filter(|p| p.scaled_atoken_balance > U256::ZERO && p.usage_as_collateral_enabled_on_user)
+        .collect::<Vec<UserPosition>>();
+    if collateral_positions.len() == 0 {
+        return Ok(false);
+    }
+    for position in collateral_positions {
+        // get the aToken balance for the underlying asset
+        let a_token = reserves_data.get(&position.underlying_asset).unwrap().aTokenAddress;
+        let a_token_contract = ERC20::new(a_token, provider.clone());
+        let a_token_balance = match a_token_contract.balanceOf(user_address).call().await {
+            Ok(balance) => balance.balance,
+            Err(e) => {
+                U256::ZERO
+            }
+        };
+
+        // get the liquidation bonus for the underlying asset
+        let liquidation_bonus = reserves_data
+            .get(&position.underlying_asset)
+            .unwrap()
+            .reserveLiquidationBonus;
+
+        // get the price of the underlying asset
+        let price = get_asset_price(provider.clone(), position.underlying_asset).await;
+
+        // get the decimals of the underlying asset
+        let decimals = reserves_data
+            .get(&position.underlying_asset)
+            .unwrap()
+            .decimals;
+
+        let symbol = reserves_data.get(&position.underlying_asset).unwrap().symbol.clone();
+
+        let a_token_balance_in_asset_units = f64::from(a_token_balance) / f64::from(10).powi(decimals.try_into().unwrap_or(0));
+        let raw = a_token_balance.as_limbs()[0] as f64; // Get the lowest limb which is u64, then convert to f64
+        let token_units = raw / 10f64.powi(decimals.try_into().unwrap_or(0));       // normalize the token amount
+        let a_token_balance_in_usd = token_units * (price.to::<u128>() as f64 / 1e8);     // multiply by price, normalize 8 decimals
+
+        // In normal operation, AAVE applies the liquidation bonus on top of the max available collateral to liquidate
+        // for this filter, we apply it on top of the whole user collateral, assuming that if it's not above the profit
+        // threshold, then it won't be above the profit threshold with max collateral to liquidate either, and thus discard the user
+        let bonus_fraction = (f64::from(liquidation_bonus) - 10000.0) / 100.0;
+        let bonus_in_usd = a_token_balance_in_usd * f64::from(bonus_fraction) / 100.0;
+        if bonus_in_usd >= min_collateral_in_usd {
+            return Ok(true)
+        };
+    };
+    Ok(false)
+}
+
 fn load_addresses_from_file(filepath: &str) -> Result<Vec<UserAddress>, Box<dyn Error>> {
     let mut addresses: Vec<UserAddress> = Vec::new();
     let file = File::open(filepath)?;
@@ -572,6 +678,7 @@ async fn get_positions_by_user(
     for bucket in address_buckets.iter().cloned() {
         let ui_data = ui_data.clone();
         let aave_pool = aave_pool.clone();
+        let provider = provider.clone();
         let task = task::spawn(async move {
             let mut results: HashMap<UserAddress, Vec<UserPosition>> = HashMap::new();
             for address in bucket {
@@ -604,6 +711,19 @@ async fn get_positions_by_user(
                                 underlying_asset: d.underlyingAsset,
                             })
                             .collect();
+                        // Then check if any collateral is above threshold
+                        let above_threshold = match has_any_collateral_above_threshold(
+                            provider.clone(),
+                            address,
+                            user_positions.clone(),
+                            MIN_COLLATERAL_THRESHOLD_IN_USD
+                        ).await {
+                            Ok(res) => res,
+                            Err(e) => continue,
+                        };
+                        if !above_threshold {
+                            continue;
+                        }
                         if !user_positions.is_empty() {
                             results.insert(address, user_positions);
                         }

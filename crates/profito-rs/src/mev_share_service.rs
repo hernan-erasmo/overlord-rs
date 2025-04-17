@@ -1,3 +1,4 @@
+use alloy::primitives::Bytes;
 use ethers_core::{
     k256::ecdsa::SigningKey,
     rand::thread_rng,
@@ -79,14 +80,25 @@ impl MevShareService {
 
     pub async fn submit_simple_liquidation_bundle(
         &self,
-        pub_tx: String,
+        pub_tx: Option<String>,
+        raw_tx: Option<Bytes>,
         foxdie_tx: TypedTransaction,
         inclusion_block: String,
     ) -> Result<SendBundleResponse, Box<dyn std::error::Error>> {
         let signature = self.tx_signer.sign_transaction(&foxdie_tx.clone().into()).await?;
         let bytes = foxdie_tx.rlp_signed(&signature);
+        let backrun_tx: BundleItem;
+        if let Some(raw) = raw_tx {
+            // Convert from alloy::primitives::Bytes to ethers_core::types::Bytes
+            let ethers_bytes = ethers_core::types::Bytes::from(raw.to_vec());
+            backrun_tx = BundleItem::Tx { tx: ethers_bytes, can_revert: false };
+        } else if let Some(pub_hash) = pub_tx {
+            backrun_tx = BundleItem::Hash { hash: H256::from_str(&pub_hash)? };
+        } else {
+            return Err(format!("Didn't get a tx hash or raw data to backrun").into());
+        };
         let bundle_body = vec![
-            BundleItem::Hash { hash: H256::from_str(&pub_tx).expect("(profito) Invalid transaction hash") },
+            backrun_tx,
             BundleItem::Tx { tx: bytes, can_revert: false },
         ];
         let block = U64::from(inclusion_block.parse::<u64>()?);

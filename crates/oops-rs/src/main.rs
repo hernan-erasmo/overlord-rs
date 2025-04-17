@@ -448,8 +448,16 @@ async fn main() {
                                     u64::MIN
                                 }
                             };
+                            let raw_tx = match provider_clone.get_raw_transaction_by_hash(tx_hash).await {
+                                Ok(raw_tx) => raw_tx,
+                                Err(e) => {
+                                    error!("Failed to get mempool raw transaction by hash: {e}");
+                                    continue;
+                                }
+                            };
                             let bundle = PriceUpdateBundle {
                                 tx_hash: format!("{:?}", &tx_hash).to_string(),
+                                raw_tx: raw_tx,
                                 inclusion_block: format!("{}", &expected_block).to_string(),
                                 trace_id: format!("{:?}", &tx_hash)[2..10].to_string(),
                                 tx_new_price,
@@ -527,6 +535,7 @@ async fn main() {
                                     };
                                     let bundle = PriceUpdateBundle {
                                         tx_hash: format!("{:?}", event.hash).to_string(),
+                                        raw_tx: None, // I believe that we can pass the hash if it's a mevshare update
                                         trace_id: format!("{:?}", event.hash)[2..10].to_string(),
                                         inclusion_block: format!("{}", &expected_block).to_string(),
                                         tx_new_price,
