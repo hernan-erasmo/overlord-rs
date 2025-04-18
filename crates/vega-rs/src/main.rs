@@ -78,7 +78,7 @@ async fn run_price_update_pipeline(
         })
         .collect::<Vec<(Address, String, U256)>>();
     let results = get_hf_for_users(
-        address_buckets,
+        address_buckets.clone(),
         fork_provider.fork_provider.as_ref().unwrap(),
         Some(trace_id.clone()),
         Some(tx_hash.clone()),
@@ -90,10 +90,11 @@ async fn run_price_update_pipeline(
     .await;
     let pipeline_processing_elapsed = pipeline_processing.elapsed().as_millis();
     info!(
-        "Candidates analysis complete for {} | {} ms | {} candidates processed | {} with HF < 1",
+        "Candidates analysis complete for {} | {} ms | {} candidates processed in {} buckets | {} with HF < 1",
         trace_id.clone(),
         pipeline_processing_elapsed,
         results.raw_results.len(),
+        address_buckets.len(),
         results.under_1_hf.len()
     );
     let hf_traces_dir = format!("{}/hf-traces", output_data_dir);
