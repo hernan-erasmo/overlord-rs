@@ -4,12 +4,14 @@ use alloy::{
 use ethers_core::abi::{decode, ParamType};
 use mev_share_sse::{client::EventStream, Event as MevShareEvent, EventClient};
 use futures_util::StreamExt;
+use lru::LruCache;
 use overlord_shared_types::{MessageBundle, PriceUpdateBundle, NewPrice};
 
 use std::{
     error::Error,
     fs::File,
     io::{self, BufRead},
+    num::NonZeroUsize,
     path::Path,
     str::FromStr,
 };
@@ -60,6 +62,7 @@ const MEV_SHARE_MAINNET_SSE_URL: &str = "https://mev-share.flashbots.net";
 const SECONDS_BEFORE_RECONNECTION: u64 = 2;
 const PATH_TO_ADDRESSES_INPUT: &str = "crates/oops-rs/addresses.txt";
 const VEGA_INBOUND_ENDPOINT: &str = "ipc:///tmp/vega_inbound";
+const OOPS_PRICE_CACHE_SIZE: usize = 10;
 
 struct ProcessingHandles {
     mempool: tokio::task::JoinHandle<()>,
@@ -340,6 +343,9 @@ async fn main() {
         }
     };
 
+    let mut new_price_cache: LruCache<NewPrice, ()> = LruCache::new(NonZeroUsize::new(OOPS_PRICE_CACHE_SIZE).unwrap());
+    info!("Price cache initialized with size: {}", OOPS_PRICE_CACHE_SIZE);
+
     loop {
         // Outer loop to restart IPC on major connection issues
         let (mut mempool_tx_stream, provider) = match create_mempool_stream().await {
@@ -411,6 +417,7 @@ async fn main() {
             let provider_clone = provider.clone();
             let vega_context = zmq::Context::new();
             let vega_socket = vega_context.socket(zmq::PUSH).unwrap();
+            let mut new_price_cache = new_price_cache.clone();
             match vega_socket.connect(VEGA_INBOUND_ENDPOINT) {
                 Ok(_) => info!("Connected to vega inbound endpoint"),
                 Err(e) => {
@@ -442,6 +449,18 @@ async fn main() {
                                     error!("MEMPOOL INVALID PRICE UPDATE: failed to get price from input: {e}");
                                     continue;
                                 }
+                            };
+                            if new_price_cache.get(&new_price).is_some() {
+                                info!(
+                                    message = "Not sending this update since it's still in the cache.",
+                                    trace_id = %format!("{:?}", tx_hash)[2..10],
+                                    tx_hash = %format!("{:?}", tx_hash),
+                                    price = %new_price.price,
+                                    forward_to = %new_price.chainlink_address,
+                                );
+                                continue;
+                            } else {
+                                new_price_cache.put(new_price.clone(), ());
                             };
                             let expected_block = match provider_clone.get_block_number().await {
                                 // When reading the block, the provider is going to return the last submitted block
@@ -520,6 +539,18 @@ async fn main() {
                                             error!("INVALID PRICE UPDATE for mev-share: failed to get price from input: {e}");
                                             continue;
                                         }
+                                    };
+                                    if new_price_cache.get(&new_price).is_some() {
+                                        info!(
+                                            message = "Not sending this update since it's still in the cache.",
+                                            trace_id = %format!("{:?}", event.hash)[2..10].to_string(),
+                                            tx_hash = %format!("{:?}", event.hash).to_string(),
+                                            price = %new_price.price,
+                                            forward_to = %new_price.chainlink_address,
+                                        );
+                                        continue;
+                                    } else {
+                                        new_price_cache.put(new_price.clone(), ());
                                     };
                                     let tx_from = match get_tx_sender_from_contract(provider.clone(), new_price.chainlink_address).await {
                                         Ok(from) => from,
