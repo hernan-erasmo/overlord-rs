@@ -1,10 +1,10 @@
 use alloy::{
-    hex, primitives::{Address, Bytes, U256}, providers::{IpcConnect, Provider, ProviderBuilder, RootProvider}, pubsub::{PubSubFrontend, Subscription}, rpc::{client::ClientBuilder, types::{Transaction}}, sol, sol_types::SolCall
+    hex, primitives::{Address, Bytes, U256}, providers::{IpcConnect, Provider, ProviderBuilder, RootProvider}, pubsub::{PubSubFrontend, Subscription}, rpc::{client::ClientBuilder, types::Transaction}, sol, sol_types::SolCall
 };
 use ethers_core::abi::{decode, ParamType};
 use mev_share_sse::{client::EventStream, Event as MevShareEvent, EventClient};
 use futures_util::StreamExt;
-use overlord_shared_types::{MessageBundle, PriceUpdateBundle};
+use overlord_shared_types::{MessageBundle, PriceUpdateBundle, NewPrice};
 
 use std::{
     error::Error,
@@ -99,7 +99,7 @@ async fn get_tx_sender_from_contract(
 }
 
 /// Extract the new price from the input data of a transaction
-fn get_price_from_input(tx_input: &Bytes) -> Result<(U256, Address), Box<dyn Error>> {
+fn get_price_from_input(tx_input: &Bytes) -> Result<NewPrice, Box<dyn Error>> {
     // get `data` from forward(address to, bytes calldata data)
     let forward_calldata = match forwardCall::abi_decode(tx_input, false) {
         Ok(data) => data,
@@ -150,7 +150,12 @@ fn get_price_from_input(tx_input: &Bytes) -> Result<(U256, Address), Box<dyn Err
     let median = &observations[observations.len() / 2];
     let answer = U256::from_str_radix(&median.to_string(), 16).unwrap();
 
-    Ok((answer, forward_calldata.to))
+    Ok(
+        NewPrice {
+            price: answer,
+            chainlink_address: forward_calldata.to,
+        }
+    )
 }
 
 /// This function reads the file of addresses we identified as senders of
@@ -431,8 +436,8 @@ async fn main() {
                                 );
                                 continue;
                             }
-                            let (tx_new_price, forward_to) = match get_price_from_input(&tx_body.input) {
-                                Ok((price, to)) => (price, to),
+                            let new_price = match get_price_from_input(&tx_body.input) {
+                                Ok(new_price) => new_price,
                                 Err(e) => {
                                     error!("MEMPOOL INVALID PRICE UPDATE: failed to get price from input: {e}");
                                     continue;
@@ -460,8 +465,8 @@ async fn main() {
                                 raw_tx: raw_tx,
                                 inclusion_block: format!("{}", &expected_block).to_string(),
                                 trace_id: format!("{:?}", &tx_hash)[2..10].to_string(),
-                                tx_new_price,
-                                forward_to,
+                                tx_new_price: new_price.price,
+                                forward_to: new_price.chainlink_address,
                                 tx_to: tx_body.to.expect("This mempool tx didn't define a TO address"),
                                 tx_from,
                                 tx_input: tx_body.input,
@@ -509,14 +514,14 @@ async fn main() {
                                 }
                                 let tx_calldata = tx.calldata.clone();
                                 if is_transmit_secondary(tx.calldata.clone()) {
-                                    let (tx_new_price, forward_to) = match get_price_from_input(&tx.calldata.unwrap()) {
-                                        Ok((price, to)) => (price, to),
+                                    let new_price = match get_price_from_input(&tx.calldata.unwrap()) {
+                                        Ok(new_price) => new_price,
                                         Err(e) => {
                                             error!("INVALID PRICE UPDATE for mev-share: failed to get price from input: {e}");
                                             continue;
                                         }
                                     };
-                                    let tx_from = match get_tx_sender_from_contract(provider.clone(), forward_to).await {
+                                    let tx_from = match get_tx_sender_from_contract(provider.clone(), new_price.chainlink_address).await {
                                         Ok(from) => from,
                                         Err(e) => {
                                             error!("Failed to get mevshare tx_from from contract: {e}");
@@ -538,8 +543,8 @@ async fn main() {
                                         raw_tx: None, // I believe that we can pass the hash if it's a mevshare update
                                         trace_id: format!("{:?}", event.hash)[2..10].to_string(),
                                         inclusion_block: format!("{}", &expected_block).to_string(),
-                                        tx_new_price,
-                                        forward_to, // vega uses this to know which asset(s) the update is for
+                                        tx_new_price: new_price.price,
+                                        forward_to: new_price.chainlink_address, // vega uses this to know which asset(s) the update is for
                                         tx_to: tx.to.unwrap(),
                                         tx_from,
                                         tx_input: tx_calldata.unwrap(),

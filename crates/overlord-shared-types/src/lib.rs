@@ -29,6 +29,11 @@ pub struct PriceUpdateBundle {
     pub tx_input: Bytes,        // Used to recreate the price update tx. These are the contents of the forward() call.
 }
 
+pub struct NewPrice {
+    pub price: U256,
+    pub chainlink_address: Address,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum WhistleblowerEventType {
     LiquidationCall,
