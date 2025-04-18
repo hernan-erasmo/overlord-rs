@@ -17,6 +17,8 @@ use overlord_shared_types::{
     WhistleblowerEventType,
     WhistleblowerUpdate
 };
+use rand::seq::{IndexedRandom, SliceRandom};
+use rand::thread_rng;
 use serde_json::json;
 use std::{collections::HashSet, sync::Arc};
 use std::fs::OpenOptions;
@@ -466,13 +468,7 @@ impl UserReservesCache {
 
         let unique_candidates: HashSet<UserAddress> =
             duplicate_candidates.clone().into_iter().collect();
-        let candidate_buckets: Vec<Vec<UserAddress>> = unique_candidates
-            .clone()
-            .into_iter()
-            .collect::<Vec<_>>()
-            .chunks(BUCKETS)
-            .map(|chunk| chunk.to_vec())
-            .collect();
+        let candidate_buckets: Vec<Vec<UserAddress>> = bucketize_optimally(unique_candidates.clone());
         let bundle_processing_elapsed = bundle_processing.elapsed().as_millis();
         info!(
             trace_id = %bundle.unwrap().trace_id,
@@ -610,7 +606,7 @@ pub async fn has_any_collateral_above_threshold(
         let a_token_contract = ERC20::new(a_token, provider.clone());
         let a_token_balance = match a_token_contract.balanceOf(user_address).call().await {
             Ok(balance) => balance.balance,
-            Err(e) => {
+            Err(_) => {
                 U256::ZERO
             }
         };
@@ -629,10 +625,6 @@ pub async fn has_any_collateral_above_threshold(
             .get(&position.underlying_asset)
             .unwrap()
             .decimals;
-
-        let symbol = reserves_data.get(&position.underlying_asset).unwrap().symbol.clone();
-
-        let a_token_balance_in_asset_units = f64::from(a_token_balance) / f64::from(10).powi(decimals.try_into().unwrap_or(0));
         let raw = a_token_balance.as_limbs()[0] as f64; // Get the lowest limb which is u64, then convert to f64
         let token_units = raw / 10f64.powi(decimals.try_into().unwrap_or(0));       // normalize the token amount
         let a_token_balance_in_usd = token_units * (price.to::<u128>() as f64 / 1e8);     // multiply by price, normalize 8 decimals
@@ -719,7 +711,7 @@ async fn get_positions_by_user(
                             MIN_COLLATERAL_THRESHOLD_IN_USD
                         ).await {
                             Ok(res) => res,
-                            Err(e) => continue,
+                            Err(_) => continue,
                         };
                         if !above_threshold {
                             continue;
@@ -779,4 +771,34 @@ fn generate_user_by_position_by_asset(
         }
     }
     user_by_position_by_asset
+}
+
+fn bucketize_optimally(
+    user_addresses: HashSet<UserAddress>,
+) -> Vec<Vec<UserAddress>> {
+    let user_addresses = user_addresses.into_iter().collect::<Vec<_>>();
+    let len_addresses = user_addresses.len();
+    let num_buckets = match len_addresses {
+        0..=99 => 1,
+        100..=999 => *[2, 4, 8].choose(&mut rand::rng()).unwrap(),
+        1000..=9999 => *[4, 8, 12].choose(&mut rand::rng()).unwrap(),
+        _ => *[8, 12, 16].choose(&mut rand::rng()).unwrap(),
+    };
+
+    let mut buckets = Vec::with_capacity(num_buckets);
+    let chunk_size = len_addresses / num_buckets;
+    let mut remainder = len_addresses % num_buckets;
+    let mut start = 0;
+
+    for _ in 0..num_buckets {
+        let mut end = start + chunk_size;
+        if remainder > 0 {
+            end += 1;
+            remainder -= 1;
+        }
+        buckets.push(user_addresses[start..end].to_vec());
+        start = end;
+    }
+
+    buckets
 }
