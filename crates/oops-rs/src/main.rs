@@ -343,7 +343,7 @@ async fn main() {
         }
     };
 
-    let mut new_price_cache: LruCache<NewPrice, ()> = LruCache::new(NonZeroUsize::new(OOPS_PRICE_CACHE_SIZE).unwrap());
+    let new_price_cache: LruCache<NewPrice, ()> = LruCache::new(NonZeroUsize::new(OOPS_PRICE_CACHE_SIZE).unwrap());
     info!("Price cache initialized with size: {}", OOPS_PRICE_CACHE_SIZE);
 
     loop {
@@ -452,7 +452,7 @@ async fn main() {
                             };
                             if new_price_cache.get(&new_price).is_some() {
                                 info!(
-                                    message = "Not sending this update since it's still in the cache.",
+                                    message = "Ignoring cached MEMPOOL update.",
                                     trace_id = %format!("{:?}", tx_hash)[2..10],
                                     tx_hash = %format!("{:?}", tx_hash),
                                     price = %new_price.price,
@@ -511,6 +511,8 @@ async fn main() {
                                 expected_block = %expected_block,
                                 tx_hash = %format!("{:?}", tx_hash),
                                 slot_info = %format!("{:?}", get_slot_information()),
+                                price = %format!("{:?}", new_price.price),
+                                forward_to = %new_price.chainlink_address,
                             );
                         }
                         PendingTxType::FromMevShare(event) => {
@@ -542,7 +544,7 @@ async fn main() {
                                     };
                                     if new_price_cache.get(&new_price).is_some() {
                                         info!(
-                                            message = "Not sending this update since it's still in the cache.",
+                                            message = "Ignoring cached MEVSHRE update.",
                                             trace_id = %format!("{:?}", event.hash)[2..10].to_string(),
                                             tx_hash = %format!("{:?}", event.hash).to_string(),
                                             price = %new_price.price,
@@ -601,6 +603,8 @@ async fn main() {
                                         expected_block = %expected_block,
                                         tx_hash = %format!("{:?}", event.hash),
                                         slot_info = %format!("{:?}", get_slot_information()),
+                                        price = %format!("{:?}", new_price.price),
+                                        forward_to = %new_price.chainlink_address,
                                     );
                                 }
                             }
