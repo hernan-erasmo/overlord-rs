@@ -33,7 +33,7 @@ use std::sync::Arc;
 use super::cache::PriceCache;
 use tracing::warn;
 
-pub const BRIBE_IN_BASIS_POINTS: u16 = 5000; // 50%
+pub const BRIBE_IN_BASIS_POINTS: u16 = 9500; // 95%
 
 #[derive(Clone, Debug)]
 pub struct BestPair {
@@ -773,7 +773,7 @@ async fn calculate_available_collateral_to_liquidate(
 /// Returns the appropriate bribe based on the amount earned
 pub fn calculate_bribe() -> U256 {
     // From 0 to 9999
-    return U256::from(BRIBE_IN_BASIS_POINTS); // 50%
+    return U256::from(BRIBE_IN_BASIS_POINTS);
 }
 
 /// Not exactly the same as the one from bpchecker
