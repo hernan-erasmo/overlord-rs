@@ -80,11 +80,8 @@ impl EventProcessor for LiquidationCallProcessor {
 
         info!(
             block = ?block_number,
-            collateral_asset = %collateralAsset,
-            debt_asset = %debtAsset,
+            tx_hash = ?log.transaction_hash,
             user = %user,
-            debt_to_cover = %debtToCover,
-            liquidated_collateral = %liquidatedCollateralAmount,
             liquidator = %liquidator,
             "LIQUIDATION CALL"
         );
