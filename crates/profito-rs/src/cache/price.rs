@@ -3,7 +3,7 @@ use alloy::{
     providers::RootProvider,
     pubsub::PubSubFrontend,
 };
-use overlord_shared_types::sol_bindings::AaveOracle;
+use overlord_shared::sol_bindings::AaveOracle;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     sync::Arc,

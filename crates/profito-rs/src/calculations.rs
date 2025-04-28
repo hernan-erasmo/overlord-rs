@@ -13,7 +13,7 @@ use alloy::{
     providers::{Provider, RootProvider},
     pubsub::PubSubFrontend,
 };
-use overlord_shared_types::sol_bindings::{
+use overlord_shared::sol_bindings::{
     AaveOracle,
     IUiPoolDataProviderV3::{
         AggregatedReserveData,

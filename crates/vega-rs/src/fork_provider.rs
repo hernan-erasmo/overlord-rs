@@ -7,7 +7,7 @@ use alloy::{
     rpc::types::{Block, BlockId, BlockTransactionsKind, TransactionRequest},
 };
 use eyre::Result;
-use overlord_shared_types::PriceUpdateBundle;
+use overlord_shared::PriceUpdateBundle;
 use std::{fs::File, panic, sync::Arc};
 use tracing::{error, info, warn};
 

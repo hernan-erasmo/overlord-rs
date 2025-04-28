@@ -5,7 +5,7 @@ use alloy::{
 };
 use chrono::Local;
 use futures::future::join_all;
-use overlord_shared_types::{
+use overlord_shared::{
     PriceUpdateBundle,
     sol_bindings::{
         AaveOracle,

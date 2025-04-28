@@ -9,7 +9,7 @@ use cache::{PriceCache, ProviderCache};
 use calculations::{get_best_liquidation_opportunity, get_reserves_list, get_reserves_data, calculate_user_account_data, calculate_best_swap_fees, calculate_bribe};
 use constants::*;
 use mev_share_service::MevShareService;
-use overlord_shared_types::{
+use overlord_shared::{
     sol_bindings::AaveOracle,
     UnderwaterUserEvent
 };

@@ -7,7 +7,7 @@ use alloy::{
 };
 use alloy_primitives::keccak256;
 use futures_util::{stream::select_all, StreamExt};
-use overlord_shared_types::{
+use overlord_shared::{
     MessageBundle, WhistleblowerEventDetails, WhistleblowerEventType, WhistleblowerUpdate,
 };
 use std::{collections::HashMap, sync::Arc};

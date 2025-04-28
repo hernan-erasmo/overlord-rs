@@ -7,7 +7,7 @@ use ethers_core::{
     types::H256,
     utils::hex,
 };
-use overlord_shared_types::sol_bindings::{
+use overlord_shared::sol_bindings::{
     pool::AaveV3Pool,
     AaveOracle, AaveProtocolDataProvider,
     Foxdie,

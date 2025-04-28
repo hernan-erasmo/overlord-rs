@@ -4,8 +4,9 @@ members = [
     "crates/vega-rs",
     "crates/oops-rs",
     "crates/whistleblower-rs",
-    "crates/overlord-shared-types"
-, "crates/profito-rs"]
+    "crates/overlord-shared",
+    "crates/profito-rs"
+]
 
 [workspace.dependencies]
 alloy = {version = "0.4.2", features = ["full", "node-bindings"]}
@@ -16,7 +17,7 @@ ethers-core = "2.0.14"
 futures-util = "0.3.31"
 hex = "0.4.3"
 mev-share = { git = "https://github.com/paradigmxyz/mev-share-rs", branch = "main" }
-overlord-shared-types = { path = "crates/overlord-shared-types" }
+overlord-shared = { path = "crates/overlord-shared" }
 serde = "1.0.214"
 tokio = { version = "1.41.1", features = ["full"]}
 tracing = "0.1"

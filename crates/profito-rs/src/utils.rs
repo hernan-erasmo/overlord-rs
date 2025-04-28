@@ -1,6 +1,6 @@
 use crate::calculations::BestPair;
 
-use overlord_shared_types::sol_bindings::{
+use overlord_shared::sol_bindings::{
     AaveProtocolDataProvider, 
     AaveUIPoolDataProvider,
     GetReserveConfigurationDataReturn,

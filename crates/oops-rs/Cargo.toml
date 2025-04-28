@@ -15,6 +15,6 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 tracing-appender.workspace = true
 hex.workspace = true
-overlord-shared-types.workspace = true
+overlord-shared.workspace = true
 tokio.workspace = true
 zmq.workspace = true

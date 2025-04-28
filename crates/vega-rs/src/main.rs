@@ -5,7 +5,7 @@ use alloy::{
 use bincode::deserialize;
 use chrono::Local;
 use clap::Parser;
-use overlord_shared_types::{MessageBundle, PriceUpdateBundle};
+use overlord_shared::{MessageBundle, PriceUpdateBundle};
 use std::env;
 use std::error::Error;
 use std::fs::File;

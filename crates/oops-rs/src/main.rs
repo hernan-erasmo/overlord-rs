@@ -5,7 +5,7 @@ use ethers_core::abi::{decode, ParamType};
 use mev_share_sse::{client::EventStream, Event as MevShareEvent, EventClient};
 use futures_util::StreamExt;
 use lru::LruCache;
-use overlord_shared_types::{MessageBundle, PriceUpdateBundle, NewPrice};
+use overlord_shared::{MessageBundle, PriceUpdateBundle, NewPrice};
 
 use std::{
     error::Error,
@@ -235,6 +235,19 @@ fn is_transmit_call(tx_body: &Transaction) -> bool {
     selector_chunk.starts_with(&transmit_selector)
 }
 
+/// Get the list of addresses that we will listen to for new price updates
+///
+/// 1. Collect all values from each item in AAVE_V3_UI_POOL_DATA's `getReservesData(AAVE_V3_PROVIDER_ADDRESS)`
+/// 2. The "priceOracle" attributes are contracts which are either EACAggregatorInterface, or
+///    some subtype of it, but eventually resolve to an EACAggregatorInterface and, more importantly,
+///    to something that implements a `getTransmitters()` function
+/// 3. Call `getTransmitters()` on each of these contracts and collect the addresses. Remove
+///    duplicates and return the list. Those are all the addresses authorized to send
+///    price updates to relevant assets, and those are the only ones we need to listen to.
+async fn collect_transmitters() -> Result<Vec<Address>, Box<dyn Error>> {
+    Ok(vec![])
+}
+
 /// Get the list of addresses thah we will listen to for new price updates
 fn _init_addresses(file_path: String) -> Result<Vec<Address>, Box<dyn Error>> {
     let allowed_addresses = match read_addresses_from_file(&file_path) {
@@ -335,6 +348,7 @@ async fn create_mev_share_stream() -> Result<EventStream<mev_share_sse::Event>, 
 async fn main() {
     _setup_logging();
 
+    // Replace this for collect_transmitters() once it's done
     let allowed_addresses = match _init_addresses(String::from(PATH_TO_ADDRESSES_INPUT)) {
         Ok(addresses) => addresses,
         Err(e) => {

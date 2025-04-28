@@ -4,7 +4,7 @@ use alloy::{
     pubsub::PubSubFrontend,
 };
 use futures::future::join_all;
-use overlord_shared_types::{
+use overlord_shared::{
     sol_bindings::pool::AaveV3Pool,
     UnderwaterUserEvent
 };

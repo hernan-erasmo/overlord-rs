@@ -3,7 +3,7 @@ use alloy::{
     providers::{IpcConnect, ProviderBuilder, RootProvider},
     pubsub::PubSubFrontend,
 };
-use overlord_shared_types::sol_bindings::{AaveOracle, AaveUIPoolDataProvider, GetReserveConfigurationDataReturn, pool::AaveV3Pool, AaveProtocolDataProvider, IERC20Metadata, IUiPoolDataProviderV3::AggregatedReserveData, ERC20};
+use overlord_shared::sol_bindings::{AaveOracle, AaveUIPoolDataProvider, GetReserveConfigurationDataReturn, pool::AaveV3Pool, AaveProtocolDataProvider, IERC20Metadata, IUiPoolDataProviderV3::AggregatedReserveData, ERC20};
 use std::{collections::HashMap, f64, sync::Arc};
 
 pub const AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS: Address = address!("3f78bbd206e4d3c504eb854232eda7e47e9fd8fc");
