@@ -23,39 +23,8 @@ use tracing::{error, info, warn};
 use tracing_appender::rolling::{self, Rotation};
 use tracing_subscriber::fmt::{time::LocalTime, writer::BoxMakeWriter};
 
-sol!(
-    #[allow(missing_docs)]
-    function forward(
-        address to,
-        bytes calldata data
-    ) external;
-
-    #[allow(missing_docs)]
-    function transmit(
-        bytes32[3] calldata reportContext,
-        bytes calldata report,
-        bytes32[] calldata rs,
-        bytes32[] calldata ss,
-        bytes32 rawVs
-    ) external override;
-
-    #[allow(missing_docs)]
-    function transmitSecondary(
-        bytes32[3] calldata reportContext,
-        bytes calldata report,
-        bytes32[] calldata rs,
-        bytes32[] calldata ss,
-        bytes32 rawVs
-    ) external override;
-
-    #[allow(missing_docs)]
-    #[allow(clippy::too_many_arguments)]
-    #[sol(rpc)]
-    contract ForwardToDestination {
-        function transmitters() external view returns (address[] memory);
-        function getTransmitters() external view returns (address[] memory);
-    }
-);
+mod sol_bindings;
+use sol_bindings::{forwardCall, transmitCall, transmitSecondaryCall, ForwardToDestination};
 
 const IPC_URL: &str = "/tmp/reth.ipc";
 const MEV_SHARE_MAINNET_SSE_URL: &str = "https://mev-share.flashbots.net";
