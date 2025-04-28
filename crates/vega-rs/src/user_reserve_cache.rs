@@ -6,19 +6,18 @@ use alloy::{
 use chrono::Local;
 use futures::future::join_all;
 use overlord_shared::{
+    common::get_reserves_data,
     PriceUpdateBundle,
     sol_bindings::{
         AaveOracle,
         AaveUIPoolDataProvider,
         ERC20,
-        IUiPoolDataProviderV3::AggregatedReserveData,
         pool::AaveV3Pool,
     },
     WhistleblowerEventType,
     WhistleblowerUpdate
 };
 use rand::seq::{IndexedRandom, SliceRandom};
-use rand::thread_rng;
 use serde_json::json;
 use std::{collections::HashSet, sync::Arc};
 use std::fs::OpenOptions;
@@ -542,21 +541,6 @@ fn load_chainlink_addresses(
     }
     info!("Loaded {} chainlink addresses.", chainlink_addresses.len());
     Ok(chainlink_addresses)
-}
-
-pub async fn get_reserves_data(provider: Arc<RootProvider<PubSubFrontend>>) -> Result<Vec<AggregatedReserveData>, Box<dyn std::error::Error>> {
-    /*
-       According to https://github.com/aave-dao/aave-v3-origin/blob/a0512f8354e97844a3ed819cf4a9a663115b8e20/src/contracts/helpers/UiPoolDataProviderV3.sol#L45
-       the reserves data is ordered the same way as the reserves list (it actually calls pool.getReservesList() and uses it as index)
-    */
-    match AaveUIPoolDataProvider::new(AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, provider.clone())
-        .getReservesData(AAVE_V3_PROVIDER_ADDRESS)
-        .call()
-        .await
-    {
-        Ok(reserves_data) => Ok(reserves_data._0),
-        Err(e) => Err(format!("Error trying to call getReservesData: {}", e).into())
-    }
 }
 
 async fn get_asset_price(provider: Arc<RootProvider<PubSubFrontend>>, asset: Address) -> U256 {

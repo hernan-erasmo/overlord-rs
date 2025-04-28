@@ -3,7 +3,19 @@ use alloy::{
     providers::{IpcConnect, ProviderBuilder, RootProvider},
     pubsub::PubSubFrontend,
 };
-use overlord_shared::sol_bindings::{AaveOracle, AaveUIPoolDataProvider, GetReserveConfigurationDataReturn, pool::AaveV3Pool, AaveProtocolDataProvider, IERC20Metadata, IUiPoolDataProviderV3::AggregatedReserveData, ERC20};
+use overlord_shared::{
+    common::get_reserves_data,
+    sol_bindings::{
+        AaveOracle,
+        AaveUIPoolDataProvider,
+        GetReserveConfigurationDataReturn,
+        pool::AaveV3Pool,
+        AaveProtocolDataProvider,
+        IERC20Metadata,
+        IUiPoolDataProviderV3::AggregatedReserveData,
+        ERC20,
+    },
+};
 use std::{collections::HashMap, f64, sync::Arc};
 
 pub const AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS: Address = address!("3f78bbd206e4d3c504eb854232eda7e47e9fd8fc");
@@ -107,21 +119,6 @@ pub struct UserPosition {
     pub usage_as_collateral_enabled_on_user: bool,
     pub scaled_variable_debt: U256,
     pub underlying_asset: ReserveAddress,
-}
-
-pub async fn get_reserves_data(provider: Arc<RootProvider<PubSubFrontend>>) -> Result<Vec<AggregatedReserveData>, Box<dyn std::error::Error>> {
-    /*
-       According to https://github.com/aave-dao/aave-v3-origin/blob/a0512f8354e97844a3ed819cf4a9a663115b8e20/src/contracts/helpers/UiPoolDataProviderV3.sol#L45
-       the reserves data is ordered the same way as the reserves list (it actually calls pool.getReservesList() and uses it as index)
-    */
-    match AaveUIPoolDataProvider::new(AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, provider.clone())
-        .getReservesData(AAVE_V3_PROVIDER_ADDRESS)
-        .call()
-        .await
-    {
-        Ok(reserves_data) => Ok(reserves_data._0),
-        Err(e) => Err(format!("Error trying to call getReservesData: {}", e).into())
-    }
 }
 
 async fn get_asset_price(provider: Arc<RootProvider<PubSubFrontend>>, asset: Address) -> U256 {
