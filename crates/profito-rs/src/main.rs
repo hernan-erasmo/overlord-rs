@@ -1,15 +1,18 @@
 mod cache;
 mod calculations;
-mod constants;
 mod mev_share_service;
 mod utils;
 
 use alloy::{providers::RootProvider, pubsub::PubSubFrontend};
 use cache::{PriceCache, ProviderCache};
-use calculations::{get_best_liquidation_opportunity, get_reserves_list, get_reserves_data, calculate_user_account_data, calculate_best_swap_fees, calculate_bribe};
-use constants::*;
+use calculations::{get_best_liquidation_opportunity, get_reserves_list, calculate_user_account_data, calculate_best_swap_fees, calculate_bribe};
 use mev_share_service::MevShareService;
 use overlord_shared::{
+    constants::{
+        AAVE_ORACLE_ADDRESS,
+        PROFITO_INBOUND_ENDPOINT,
+    },
+    common::get_reserves_data,
     sol_bindings::AaveOracle,
     UnderwaterUserEvent
 };

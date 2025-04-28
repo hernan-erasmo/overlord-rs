@@ -7,11 +7,19 @@ use ethers_core::{
     types::H256,
     utils::hex,
 };
-use overlord_shared::sol_bindings::{
-    pool::AaveV3Pool,
-    AaveOracle, AaveProtocolDataProvider,
-    Foxdie,
-    IUiPoolDataProviderV3::{AggregatedReserveData, UserReserveData},
+use overlord_shared::{
+    common::get_reserves_data,
+    constants::{
+        AAVE_ORACLE_ADDRESS,
+        AAVE_V3_POOL_ADDRESS,
+        AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS,
+    },
+    sol_bindings::{
+        pool::AaveV3Pool,
+        AaveOracle, AaveProtocolDataProvider,
+        Foxdie,
+        IUiPoolDataProviderV3::{AggregatedReserveData, UserReserveData},
+    }
 };
 use profito_rs::{
     cache::PriceCache,
@@ -25,12 +33,8 @@ use profito_rs::{
         calculate_actual_debt_to_liquidate,
         calculate_user_balances,
         get_reserves_list,
-        get_reserves_data,
         calculate_user_account_data,
         calculate_best_swap_fees,
-    },
-    constants::{
-        AAVE_ORACLE_ADDRESS, AAVE_V3_POOL_ADDRESS, AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS,
     },
     utils::{ReserveConfigurationEnhancedData, generate_reserve_details_by_asset, get_user_reserves_data},
 };

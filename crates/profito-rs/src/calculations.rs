@@ -1,32 +1,31 @@
-use crate::constants::{
-    AAVE_ORACLE_ADDRESS,
-    AAVE_V3_POOL_ADDRESS,
-    AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS,
-    AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS,
-    AAVE_V3_PROVIDER_ADDRESS,
-    MORPHO,
-    UNISWAP_V3_FACTORY,
-    WETH,
-};
 use alloy::{
     primitives::{aliases::U24, utils::format_units, Address, U256},
     providers::{Provider, RootProvider},
     pubsub::PubSubFrontend,
 };
-use overlord_shared::sol_bindings::{
-    AaveOracle,
-    IUiPoolDataProviderV3::{
-        AggregatedReserveData,
-        UserReserveData
+use overlord_shared::{
+    constants::{
+        AAVE_ORACLE_ADDRESS,
+        AAVE_V3_POOL_ADDRESS,
+        AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS,
+        MORPHO,
+        UNISWAP_V3_FACTORY,
+        WETH,
     },
-    IAToken,
-    ERC20,
-    pool::AaveV3Pool,
-    AaveUIPoolDataProvider,
-    AaveProtocolDataProvider,
-    UniswapV3Pool,
-    UniswapV3Factory,
-    Foxdie,
+    sol_bindings::{
+        AaveOracle,
+        IUiPoolDataProviderV3::{
+            AggregatedReserveData,
+            UserReserveData
+        },
+        IAToken,
+        ERC20,
+        pool::AaveV3Pool,
+        AaveProtocolDataProvider,
+        UniswapV3Pool,
+        UniswapV3Factory,
+        Foxdie,
+    }
 };
 use std::sync::Arc;
 
@@ -262,21 +261,6 @@ pub async fn get_reserves_list(provider: Arc<RootProvider<PubSubFrontend>>) -> R
     {
         Ok(reserves_list) => Ok(reserves_list._0),
         Err(e) => Err(format!("Error trying to call getReservesList: {}", e).into())
-    }
-}
-
-pub async fn get_reserves_data(provider: Arc<RootProvider<PubSubFrontend>>) -> Result<Vec<AggregatedReserveData>, Box<dyn std::error::Error>> {
-    /*
-       According to https://github.com/aave-dao/aave-v3-origin/blob/a0512f8354e97844a3ed819cf4a9a663115b8e20/src/contracts/helpers/UiPoolDataProviderV3.sol#L45
-       the reserves data is ordered the same way as the reserves list (it actually calls pool.getReservesList() and uses it as index)
-    */
-    match AaveUIPoolDataProvider::new(AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, provider.clone())
-        .getReservesData(AAVE_V3_PROVIDER_ADDRESS)
-        .call()
-        .await
-    {
-        Ok(reserves_data) => Ok(reserves_data._0),
-        Err(e) => Err(format!("Error trying to call getReservesData: {}", e).into())
     }
 }
 
