@@ -17,6 +17,7 @@ ethers-core = "2.0.14"
 futures-util = "0.3.31"
 hex = "0.4.3"
 mev-share = { git = "https://github.com/paradigmxyz/mev-share-rs", branch = "main" }
+once_cell = "1.20.2"
 overlord-shared = { path = "crates/overlord-shared" }
 serde = "1.0.214"
 tokio = { version = "1.41.1", features = ["full"]}
