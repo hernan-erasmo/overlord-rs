@@ -80,6 +80,153 @@ sol!(
 sol!(
     #[allow(missing_docs)]
     #[allow(clippy::too_many_arguments)]
+    #[sol(rpc)]
+    #[derive(Debug)]
+    EACAggregatorProxy,
+    "src/abis/aggregators/EACAggregatorProxy.json"
+);
+
+sol!(
+    #[allow(missing_docs)]
+    #[allow(clippy::too_many_arguments)]
+    #[sol(rpc)]
+    #[derive(Debug)]
+    PriceCapAdapterStable,
+    "src/abis/aggregators/PriceCapAdapterStable.json"
+);
+
+sol!(
+    #[allow(missing_docs)]
+    #[allow(clippy::too_many_arguments)]
+    #[sol(rpc)]
+    #[derive(Debug)]
+    CLSynchronicityPriceAdapterPegToBase,
+    "src/abis/aggregators/CLSynchronicityPriceAdapterPegToBase.json"
+);
+
+pub mod WstETHAggregator {
+    use alloy::sol;
+    sol!(
+        #[allow(missing_docs)]
+        #[allow(clippy::too_many_arguments)]
+        #[sol(rpc)]
+        #[derive(Debug)]
+        WstETHPriceCapAdapter,
+        "src/abis/aggregators/WstETHPriceCapAdapter.json"
+    );
+}
+
+pub mod CbETHAggregator {
+    use alloy::sol;
+    sol!(
+        #[allow(missing_docs)]
+        #[allow(clippy::too_many_arguments)]
+        #[sol(rpc)]
+        #[derive(Debug)]
+        CbETHPriceCapAdapter,
+        "src/abis/aggregators/CbETHPriceCapAdapter.json"
+    );
+}
+
+pub mod RETHAggregator {
+    use alloy::sol;
+    sol!(
+        #[allow(missing_docs)]
+        #[allow(clippy::too_many_arguments)]
+        #[sol(rpc)]
+        #[derive(Debug)]
+        RETHPriceCapAdapter,
+        "src/abis/aggregators/RETHPriceCapAdapter.json"
+    );
+}
+
+pub mod EBTCAggregator {
+    use alloy::sol;
+    sol!(
+        #[allow(missing_docs)]
+        #[allow(clippy::too_many_arguments)]
+        #[sol(rpc)]
+        #[derive(Debug)]
+        EBTCPriceCapAdapter,
+        "src/abis/aggregators/EBTCPriceCapAdapter.json"
+    );
+}
+
+pub mod WeETHAggregator {
+    use alloy::sol;
+    sol!(
+        #[allow(missing_docs)]
+        #[allow(clippy::too_many_arguments)]
+        #[sol(rpc)]
+        #[derive(Debug)]
+        WeETHPriceCapAdapter,
+        "src/abis/aggregators/WeETHPriceCapAdapter.json"
+    );
+}
+
+pub mod OsETHAggregator {
+    use alloy::sol;
+    sol!(
+        #[allow(missing_docs)]
+        #[allow(clippy::too_many_arguments)]
+        #[sol(rpc)]
+        #[derive(Debug)]
+        OsETHPriceCapAdapter,
+        "src/abis/aggregators/OsETHPriceCapAdapter.json"
+    );
+}
+
+pub mod EthXAggregator {
+    use alloy::sol;
+    sol!(
+        #[allow(missing_docs)]
+        #[allow(clippy::too_many_arguments)]
+        #[sol(rpc)]
+        #[derive(Debug)]
+        EthXPriceCapAdapter,
+        "src/abis/aggregators/EthXPriceCapAdapter.json"
+    );
+}
+
+pub mod SUSDeAggregator {
+    use alloy::sol;
+    sol!(
+        #[allow(missing_docs)]
+        #[allow(clippy::too_many_arguments)]
+        #[sol(rpc)]
+        #[derive(Debug)]
+        SUSDePriceCapAdapter,
+        "src/abis/aggregators/SUSDePriceCapAdapter.json"
+    );
+}
+
+pub mod sDAIAggregator {
+    use alloy::sol;
+    sol!(
+        #[allow(missing_docs)]
+        #[allow(clippy::too_many_arguments)]
+        #[sol(rpc)]
+        #[derive(Debug)]
+        sDAISynchronicityPriceAdapter,
+        "src/abis/aggregators/sDAISynchronicityPriceAdapter.json"
+    );
+}
+
+pub mod RsETHAggregator {
+    use alloy::sol;
+    sol!(
+        #[allow(missing_docs)]
+        #[allow(clippy::too_many_arguments)]
+        #[sol(rpc)]
+        #[derive(Debug)]
+        RsETHPriceCapAdapter,
+        "src/abis/aggregators/RsETHPriceCapAdapter.json"
+    );
+}
+
+sol!(
+    #[allow(missing_docs)]
+    #[allow(clippy::too_many_arguments)]
     #[derive(Debug, PartialEq)]
     #[sol(rpc)]
     contract Foxdie {
