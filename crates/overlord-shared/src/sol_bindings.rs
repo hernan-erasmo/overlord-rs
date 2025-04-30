@@ -104,6 +104,15 @@ sol!(
     "src/abis/aggregators/CLSynchronicityPriceAdapterPegToBase.json"
 );
 
+sol!(
+    #[allow(missing_docs)]
+    #[allow(clippy::too_many_arguments)]
+    #[sol(rpc)]
+    #[derive(Debug)]
+    AccessControlledOCR2Aggregator,
+    "src/abis/aggregators/AccessControlledOCR2Aggregator.json"
+);
+
 pub mod WstETHAggregator {
     use alloy::sol;
     sol!(
