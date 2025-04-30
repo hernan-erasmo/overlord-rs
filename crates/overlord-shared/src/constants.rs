@@ -14,3 +14,4 @@ pub const MORPHO: Address = address!("BBBBBbbBBb9cC5e90e3b3Af64bdAF62C37EEFFCb")
 // used on bpchecker
 pub const AAVE_V3_POOL_ADDRESS: Address = address!("87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2");
 pub const WETH: Address = address!("C02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2");
+pub const GHO_PRICE_ORACLE: Address = address!("D110cac5d8682A3b045D5524a9903E031d70FCCd");
