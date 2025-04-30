@@ -1,20 +1,22 @@
 use alloy::{
-    hex, primitives::{Address, Bytes, U256}, providers::{IpcConnect, Provider, ProviderBuilder, RootProvider}, pubsub::{PubSubFrontend, Subscription}, rpc::{client::ClientBuilder, types::Transaction}, sol, sol_types::SolCall
+    hex, primitives::{Address, Bytes, U256}, providers::{IpcConnect, Provider, ProviderBuilder, RootProvider}, pubsub::{PubSubFrontend, Subscription}, rpc::{client::ClientBuilder, types::Transaction}, sol_types::SolCall
 };
 use ethers_core::abi::{decode, ParamType};
 use mev_share_sse::{client::EventStream, Event as MevShareEvent, EventClient};
 use futures_util::StreamExt;
 use lru::LruCache;
-use overlord_shared::{MessageBundle, PriceUpdateBundle, NewPrice};
+use overlord_shared::{common::get_reserves_data, constants::GHO_PRICE_ORACLE, sol_bindings::{AccessControlledOCR2Aggregator, EACAggregatorProxy}, MessageBundle, NewPrice, PriceUpdateBundle};
 
 use std::{
+    collections::HashMap,
     error::Error,
     fs::File,
     io::{self, BufRead},
     num::NonZeroUsize,
     path::Path,
-    str::FromStr,
+    str::FromStr, sync::Arc,
 };
+use serde_json::json;
 use tokio::{
     sync::broadcast,
     time::{sleep, Duration},
@@ -25,6 +27,9 @@ use tracing_subscriber::fmt::{time::LocalTime, writer::BoxMakeWriter};
 
 mod sol_bindings;
 use sol_bindings::{forwardCall, transmitCall, transmitSecondaryCall, ForwardToDestination};
+
+mod resolvers;
+use resolvers::resolve_aggregator;
 
 const IPC_URL: &str = "/tmp/reth.ipc";
 const MEV_SHARE_MAINNET_SSE_URL: &str = "https://mev-share.flashbots.net";
@@ -213,8 +218,55 @@ fn is_transmit_call(tx_body: &Transaction) -> bool {
 /// 3. Call `getTransmitters()` on each of these contracts and collect the addresses. Remove
 ///    duplicates and return the list. Those are all the addresses authorized to send
 ///    price updates to relevant assets, and those are the only ones we need to listen to.
-async fn collect_transmitters() -> Result<Vec<Address>, Box<dyn Error>> {
-    Ok(vec![])
+async fn collect_transmitters(
+    provider: Arc<RootProvider<PubSubFrontend>>,
+) -> Result<Vec<Address>, Box<dyn Error>> {
+    let mut collected_transmitters = vec![];
+    let mut aggregator_to_oracle_map = HashMap::new();
+    
+    let reserves = match get_reserves_data(provider.clone()).await {
+        Ok(response) => response,
+        Err(e) => return Err(format!("Error fetching reserves data in collect_transmitters(): {}", e).into())
+    };
+    
+    for reserve in reserves.iter() {
+        let aggregator_address = match resolve_aggregator(provider.clone(), reserve.priceOracle).await {
+            Ok(addr) => {
+                if addr == GHO_PRICE_ORACLE {
+                    continue
+                }
+                let agg_address = match EACAggregatorProxy::new(addr, provider.clone()).aggregator().call().await {
+                    Ok(agg) => agg._0,
+                    Err(e) => return Err(format!("Couldn't get aggregator() from address {}: {}", addr, e).into())
+                };
+                
+                // Store the mapping between aggregator and oracle
+                aggregator_to_oracle_map.insert(format!("{:#x}", agg_address), format!("{:#x}", reserve.priceOracle));
+                
+                agg_address
+            },
+            Err(e) => return Err(format!("Error fetching aggregator for oracle {}: {}", reserve.priceOracle, e).into())
+        };
+        
+        let transmitters = match AccessControlledOCR2Aggregator::new(aggregator_address, provider.clone()).getTransmitters().call().await {
+            Ok(response) => response._0,
+            Err(e) => return Err(format!("Couldn't get transmitters from aggregator {}: {}", aggregator_address, e).into())
+        };
+        collected_transmitters.extend(transmitters);
+    }
+    
+    // Generate the JSON file with the mapping
+    match serde_json::to_string_pretty(&aggregator_to_oracle_map) {
+        Ok(json_str) => {
+            match std::fs::write("aggregator_to_oracle_map.json", json_str) {
+                Ok(_) => info!("Successfully wrote aggregator to oracle mapping to aggregator_to_oracle_map.json"),
+                Err(e) => error!("Failed to write aggregator to oracle mapping file: {}", e)
+            }
+        },
+        Err(e) => error!("Failed to serialize aggregator to oracle mapping: {}", e)
+    }
+    
+    Ok(collected_transmitters)
 }
 
 /// Get the list of addresses thah we will listen to for new price updates
@@ -276,9 +328,8 @@ fn get_slot_information() -> (f32, f32) {
     (captured_at, remaining)
 }
 
-/// Create a mempool stream to listen for pending transactions
-/// Returns the subscrition on which to await, and the provider to query the block number or whatever
-async fn create_mempool_stream() -> Result<(Subscription<Transaction>, RootProvider<PubSubFrontend>), Box<dyn Error>> {
+/// Create a new provider to connect to the Ethereum node
+async fn create_provider() -> Result<RootProvider<PubSubFrontend>, Box<dyn Error>> {
     let ipc = IpcConnect::new(IPC_URL.to_string());
     let client = match ClientBuilder::default().ipc(ipc).await {
         Ok(client) => {
@@ -295,11 +346,18 @@ async fn create_mempool_stream() -> Result<(Subscription<Transaction>, RootProvi
         }
     };
     let provider = ProviderBuilder::new().on_client(client);
+    Ok(provider)
+}
+
+/// Create a mempool stream to listen for pending transactions
+async fn create_subscription_stream(
+    provider: &RootProvider<PubSubFrontend>,
+) -> Result<Subscription<Transaction>, Box<dyn Error>> {
     let stream = match provider.subscribe_full_pending_transactions().await {
         Ok(stream) => stream,
         Err(e) => return Err(Box::new(e))
     };
-    Ok((stream, provider))
+    Ok(stream)
 }
 
 async fn create_mev_share_stream() -> Result<EventStream<mev_share_sse::Event>, Box<dyn Error>> {
@@ -329,9 +387,18 @@ async fn main() {
     let new_price_cache: LruCache<NewPrice, ()> = LruCache::new(NonZeroUsize::new(OOPS_PRICE_CACHE_SIZE).unwrap());
     info!("Price cache initialized with size: {}", OOPS_PRICE_CACHE_SIZE);
 
+    let provider = match create_provider().await {
+        Ok(provider) => provider,
+        Err(e) => {
+            error!("Failed to create provider: {e}");
+            std::process::exit(1);
+        }
+    };
+
     loop {
+        let provider = provider.clone();
         // Outer loop to restart IPC on major connection issues
-        let (mut mempool_tx_stream, provider) = match create_mempool_stream().await {
+        let mut mempool_tx_stream = match create_subscription_stream(&provider).await {
             Ok(stream) => stream,
             Err(e) => {
                 error!(
