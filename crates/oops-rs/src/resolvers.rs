@@ -148,13 +148,14 @@ pub async fn resolve_asset_to_peg(_provider: Arc<RootProvider<PubSubFrontend>>, 
 }
 
 pub async fn resolve_susde_aggregator(_provider: Arc<RootProvider<PubSubFrontend>>, oracle_address_for_aave: Address) -> Address {
-    match SUSDePriceCapAdapter::new(
+    let base_to_usd_aggregator = match SUSDePriceCapAdapter::new(
         oracle_address_for_aave,
         _provider.clone())
     .BASE_TO_USD_AGGREGATOR().call().await {
         Ok(response) => response._0,
         Err(_) => Address::ZERO
-    }
+    };
+    resolve_asset_to_usd_aggregator(_provider.clone(), base_to_usd_aggregator).await
 }
    
 pub async fn resolve_dai_to_usd_aggregator(_provider: Arc<RootProvider<PubSubFrontend>>, oracle_address_for_aave: Address) -> Address {
