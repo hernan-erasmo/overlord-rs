@@ -230,6 +230,7 @@ async fn collect_transmitters(
     };
     
     for reserve in reserves.iter() {
+        info!("Resolving aggregator for {} [{}/{}]", &reserve.symbol, reserves.iter().position(|r| r.symbol == reserve.symbol).unwrap_or(0) + 1, reserves.len());
         let aggregator_address = match resolve_aggregator(provider.clone(), reserve.priceOracle).await {
             Ok(addr) => {
                 if addr == GHO_PRICE_ORACLE {
@@ -237,7 +238,7 @@ async fn collect_transmitters(
                 }
                 let agg_address = match EACAggregatorProxy::new(addr, provider.clone()).aggregator().call().await {
                     Ok(agg) => agg._0,
-                    Err(e) => return Err(format!("Couldn't get aggregator() from address {}: {}", addr, e).into())
+                    Err(e) => return Err(format!("Couldn't get aggregator() from address {} (price oracle: {}): {}", addr, reserve.priceOracle, e).into())
                 };
                 
                 // Store the mapping between aggregator and oracle
@@ -254,7 +255,7 @@ async fn collect_transmitters(
         };
         collected_transmitters.extend(transmitters);
     }
-    
+
     // Generate the JSON file with the mapping
     match serde_json::to_string_pretty(&aggregator_to_oracle_map) {
         Ok(json_str) => {
@@ -266,7 +267,10 @@ async fn collect_transmitters(
         Err(e) => error!("Failed to serialize aggregator to oracle mapping: {}", e)
     }
     
-    Ok(collected_transmitters)
+    // Remove duplicates using a HashSet
+    let unique_transmitters: std::collections::HashSet<_> = collected_transmitters.into_iter().collect();
+    info!("Found {} unique transmitters", unique_transmitters.len());
+    Ok(unique_transmitters.into_iter().collect())
 }
 
 /// Get the list of addresses thah we will listen to for new price updates
@@ -394,6 +398,15 @@ async fn main() {
             std::process::exit(1);
         }
     };
+
+    let transmitters = match collect_transmitters(Arc::new(provider.clone())).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            error!("Failed to collect transmitters: {e}");
+            std::process::exit(1);
+        }
+    };
+    info!("Transmitters we would listen to for price updates: {:?}", transmitters);
 
     loop {
         let provider = provider.clone();
