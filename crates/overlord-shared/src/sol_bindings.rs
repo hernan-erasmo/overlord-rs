@@ -125,6 +125,18 @@ pub mod WstETHAggregator {
     );
 }
 
+pub mod PendlePriceCapAggregator {
+    use alloy::sol;
+    sol!(
+        #[allow(missing_docs)]
+        #[allow(clippy::too_many_arguments)]
+        #[sol(rpc)]
+        #[derive(Debug)]
+        PendlePriceCapAdapter,
+        "src/abis/aggregators/PendlePriceCapAdapter.json"
+    );
+}
+
 pub mod CbETHAggregator {
     use alloy::sol;
     sol!(
