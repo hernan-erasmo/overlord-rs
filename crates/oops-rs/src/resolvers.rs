@@ -3,7 +3,7 @@ use std::sync::Arc;
 use alloy::{primitives::{address, Address}, providers::RootProvider, pubsub::PubSubFrontend};
 use once_cell::sync::Lazy;
 
-use overlord_shared::sol_bindings::{sDAIAggregator::sDAISynchronicityPriceAdapter, CLSynchronicityPriceAdapterPegToBase, CbETHAggregator::CbETHPriceCapAdapter, EBTCAggregator::EBTCPriceCapAdapter, EthXAggregator::EthXPriceCapAdapter, OsETHAggregator::OsETHPriceCapAdapter, PriceCapAdapterStable, RETHAggregator::RETHPriceCapAdapter, RsETHAggregator::RsETHPriceCapAdapter, SUSDeAggregator::SUSDePriceCapAdapter, WeETHAggregator::WeETHPriceCapAdapter, WstETHAggregator::WstETHPriceCapAdapter};
+use overlord_shared::sol_bindings::{sDAIAggregator::sDAISynchronicityPriceAdapter, CLSynchronicityPriceAdapterPegToBase, CbETHAggregator::CbETHPriceCapAdapter, EBTCAggregator::EBTCPriceCapAdapter, EthXAggregator::EthXPriceCapAdapter, OsETHAggregator::OsETHPriceCapAdapter, PendlePriceCapAggregator::PendlePriceCapAdapter, PriceCapAdapterStable, RETHAggregator::RETHPriceCapAdapter, RsETHAggregator::RsETHPriceCapAdapter, SUSDeAggregator::SUSDePriceCapAdapter, WeETHAggregator::WeETHPriceCapAdapter, WstETHAggregator::WstETHPriceCapAdapter};
 
 use std::future::Future;
 type ResolverFunction = fn(Arc<RootProvider<PubSubFrontend>>, Address) -> Box<dyn Future<Output = Address> + Send + 'static>;
@@ -93,6 +93,13 @@ pub static GHO_ADAPTER: Lazy<Vec<Address>> = Lazy::new(|| {
     oracles
 });
 
+pub static PENDLE_PRICE_CAP_ADAPTERS: Lazy<Vec<Address>> = Lazy::new(|| {
+    let oracles = vec![
+        address!("5292AB3292D076271f853Ed8e05e61cc02F0A2C6"),
+    ];
+    oracles
+});
+
 /// Caller needs to check the return value and handle the special GHO case (because
 /// that aggregator doesn't implement `getTransmitters()`)
 pub async fn resolve_aggregator(
@@ -117,6 +124,9 @@ pub async fn resolve_aggregator(
             
         addr if SDAI_PRICE_ADAPTERS.contains(&addr) => 
             Ok(resolve_dai_to_usd_aggregator(provider, addr).await),
+
+        addr if PENDLE_PRICE_CAP_ADAPTERS.contains(&addr) =>
+            Ok(resolve_pendle_aggregator(provider, addr).await),
 
         addr if GHO_ADAPTER.contains(&addr) =>
             Ok(resolve_gho_aggregator(provider, addr).await),
@@ -157,12 +167,20 @@ pub async fn resolve_susde_aggregator(_provider: Arc<RootProvider<PubSubFrontend
     };
     resolve_asset_to_usd_aggregator(_provider.clone(), base_to_usd_aggregator).await
 }
-   
+
 pub async fn resolve_dai_to_usd_aggregator(_provider: Arc<RootProvider<PubSubFrontend>>, oracle_address_for_aave: Address) -> Address {
     match sDAISynchronicityPriceAdapter::new(oracle_address_for_aave, _provider.clone()).DAI_TO_USD().call().await {
         Ok(response) => response._0,
         Err(_) => Address::ZERO,
     }
+}
+
+pub async fn resolve_pendle_aggregator(_provider: Arc<RootProvider<PubSubFrontend>>, oracle_address_for_aave: Address) -> Address {
+    let asset_to_usd_aggregator_address = match PendlePriceCapAdapter::new(oracle_address_for_aave, _provider.clone()).ASSET_TO_USD_AGGREGATOR().call().await {
+        Ok(response) => response._0,
+        Err(_) => Address::ZERO,
+    };
+    resolve_asset_to_usd_aggregator(_provider.clone(), asset_to_usd_aggregator_address).await
 }
 
 pub async fn resolve_base_to_usd_aggregator(_provider: Arc<RootProvider<PubSubFrontend>>, oracle_address_for_aave: Address) -> Address {
