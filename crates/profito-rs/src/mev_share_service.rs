@@ -2,25 +2,29 @@ use alloy::primitives::Bytes;
 use ethers_core::{
     k256::ecdsa::SigningKey,
     rand::thread_rng,
-    types::{
-        Chain,
-        H256,
-        transaction::eip2718::TypedTransaction,
-        U64,
-    },
+    types::{transaction::eip2718::TypedTransaction, Chain, H256, U64},
 };
 use ethers_signers::{LocalWallet, Signer, Wallet};
-use jsonrpsee::http_client::{transport::{Error as HttpError, HttpBackend}, HttpClient, HttpClientBuilder};
-use mev_share::rpc::{BundleItem, FlashbotsSigner, FlashbotsSignerLayer, Inclusion, MevApiClient, SendBundleRequest, SendBundleResponse};
-use once_cell::sync::OnceCell;
-use std::{
-    env, str::FromStr, sync::Arc
+use jsonrpsee::http_client::{
+    transport::{Error as HttpError, HttpBackend},
+    HttpClient, HttpClientBuilder,
 };
+use mev_share::rpc::{
+    BundleItem, FlashbotsSigner, FlashbotsSignerLayer, Inclusion, MevApiClient, SendBundleRequest,
+    SendBundleResponse,
+};
+use once_cell::sync::OnceCell;
+use std::{env, str::FromStr, sync::Arc};
 use tokio::sync::Mutex;
 use tower::{util::MapErr, ServiceBuilder};
 use tracing::info;
 
-type MevShareClient = HttpClient<MapErr<FlashbotsSigner<Wallet<SigningKey>, HttpBackend>, fn(Box<dyn std::error::Error + Send + Sync>) -> HttpError>>;
+type MevShareClient = HttpClient<
+    MapErr<
+        FlashbotsSigner<Wallet<SigningKey>, HttpBackend>,
+        fn(Box<dyn std::error::Error + Send + Sync>) -> HttpError,
+    >,
+>;
 
 static MEVSHARE_CLIENT: OnceCell<Arc<MevShareClient>> = OnceCell::new();
 
@@ -41,14 +45,14 @@ impl MevShareService {
     pub fn new() -> Self {
         Self {
             fb_signer: LocalWallet::new(&mut thread_rng()),
-            tx_signer: LocalWallet::from_str(&env::var("FOXDIE_OWNER_PK").unwrap()).unwrap().with_chain_id(Chain::Mainnet),
+            tx_signer: LocalWallet::from_str(&env::var("FOXDIE_OWNER_PK").unwrap())
+                .unwrap()
+                .with_chain_id(Chain::Mainnet),
             initialization: Arc::new(Mutex::new(())),
         }
     }
 
-    pub async fn get_client(
-        &self,
-    ) -> Result<Arc<MevShareClient>, Box<dyn std::error::Error>> {
+    pub async fn get_client(&self) -> Result<Arc<MevShareClient>, Box<dyn std::error::Error>> {
         if let Some(client) = MEVSHARE_CLIENT.get() {
             return Ok((*client).clone());
         }
@@ -85,21 +89,31 @@ impl MevShareService {
         foxdie_tx: TypedTransaction,
         inclusion_block: String,
     ) -> Result<SendBundleResponse, Box<dyn std::error::Error>> {
-        let signature = self.tx_signer.sign_transaction(&foxdie_tx.clone().into()).await?;
+        let signature = self.tx_signer.sign_transaction(&foxdie_tx.clone()).await?;
         let bytes = foxdie_tx.rlp_signed(&signature);
         let backrun_tx: BundleItem;
         if let Some(raw) = raw_tx {
             // Convert from alloy::primitives::Bytes to ethers_core::types::Bytes
             let ethers_bytes = ethers_core::types::Bytes::from(raw.to_vec());
-            backrun_tx = BundleItem::Tx { tx: ethers_bytes, can_revert: false };
+            backrun_tx = BundleItem::Tx {
+                tx: ethers_bytes,
+                can_revert: false,
+            };
         } else if let Some(pub_hash) = pub_tx {
-            backrun_tx = BundleItem::Hash { hash: H256::from_str(&pub_hash)? };
+            backrun_tx = BundleItem::Hash {
+                hash: H256::from_str(&pub_hash)?,
+            };
         } else {
-            return Err(format!("Didn't get a tx hash or raw data to backrun").into());
+            return Err("Didn't get a tx hash or raw data to backrun"
+                .to_string()
+                .into());
         };
         let bundle_body = vec![
             backrun_tx,
-            BundleItem::Tx { tx: bytes, can_revert: false },
+            BundleItem::Tx {
+                tx: bytes,
+                can_revert: false,
+            },
         ];
         let block = U64::from(inclusion_block.parse::<u64>()?);
         let max_block = block + U64::from(5u64);
@@ -116,7 +130,7 @@ impl MevShareService {
         info!("Sending bundle: {:?}", bundle);
         match MevApiClient::send_bundle(client, bundle.clone()).await {
             Ok(res) => Ok(res),
-            Err(e) => Err(format!("Error on send_bundle: {}", e).into())
+            Err(e) => Err(format!("Error on send_bundle: {}", e).into()),
         }
     }
 }

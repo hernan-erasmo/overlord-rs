@@ -20,15 +20,15 @@ pub struct UnderwaterUserEvent {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PriceUpdateBundle {
-    pub trace_id: String,       // This is just a string that helps trace the bundle through overlord
-    pub tx_hash: String,        // The pending tx hash
-    pub raw_tx: Option<Bytes>,  // The raw tx bytes
+    pub trace_id: String, // This is just a string that helps trace the bundle through overlord
+    pub tx_hash: String,  // The pending tx hash
+    pub raw_tx: Option<Bytes>, // The raw tx bytes
     pub inclusion_block: String,
-    pub tx_new_price: U256,     // The new price of the asset indicated by this update. Used by profito to calculate profit
-    pub forward_to: Address,    // Used in chainlink_address_to_asset mapping to determine which asset is affected by this tx
-    pub tx_from: Address,       // Used to recreate the price update tx. This is the address that submitted the forward() call.
-    pub tx_to: Address,         // Used to recreate the price update tx. This is the address that receives the forward() call.
-    pub tx_input: Bytes,        // Used to recreate the price update tx. These are the contents of the forward() call.
+    pub tx_new_price: U256, // The new price of the asset indicated by this update. Used by profito to calculate profit
+    pub forward_to: Address, // Used in chainlink_address_to_asset mapping to determine which asset is affected by this tx
+    pub tx_from: Address, // Used to recreate the price update tx. This is the address that submitted the forward() call.
+    pub tx_to: Address, // Used to recreate the price update tx. This is the address that receives the forward() call.
+    pub tx_input: Bytes, // Used to recreate the price update tx. These are the contents of the forward() call.
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

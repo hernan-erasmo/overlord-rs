@@ -13,7 +13,7 @@ bincode.workspace = true
 chrono.workspace = true
 clap = { version = "4.5.20", features = ["derive"] }
 eyre = "0.6.12"
-futures = "0.3.31"
+futures.workspace = true
 overlord-shared.workspace = true
 rand = "0.9.1"
 serde.workspace = true

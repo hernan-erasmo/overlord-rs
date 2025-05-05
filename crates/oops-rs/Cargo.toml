@@ -8,6 +8,7 @@ alloy.workspace = true
 bincode.workspace = true
 chrono.workspace = true
 ethers-core.workspace = true
+futures.workspace = true
 futures-util.workspace = true
 lru = "0.14.0"
 mev-share-sse = "0.4.0"

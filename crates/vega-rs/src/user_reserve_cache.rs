@@ -7,19 +7,11 @@ use chrono::Local;
 use futures::future::join_all;
 use overlord_shared::{
     common::get_reserves_data,
-    PriceUpdateBundle,
-    sol_bindings::{
-        AaveOracle,
-        AaveUIPoolDataProvider,
-        ERC20,
-        pool::AaveV3Pool,
-    },
-    WhistleblowerEventType,
-    WhistleblowerUpdate
+    sol_bindings::{pool::AaveV3Pool, AaveOracle, AaveUIPoolDataProvider, ERC20},
+    PriceUpdateBundle, WhistleblowerEventType, WhistleblowerUpdate,
 };
-use rand::seq::{IndexedRandom, SliceRandom};
+use rand::seq::IndexedRandom;
 use serde_json::json;
-use std::{collections::HashSet, sync::Arc};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::{
@@ -29,6 +21,7 @@ use std::{
     io::{self, BufRead},
     str::FromStr,
 };
+use std::{collections::HashSet, sync::Arc};
 use tokio::{sync::RwLock, task, time::Instant};
 use tracing::{error, info, warn};
 
@@ -418,7 +411,11 @@ impl UserReservesCache {
 
         let affected_reserves = self._calculate_affected_reserves(forwarded_to_address);
         if affected_reserves.is_empty() {
-            warn!("No affected reserves found for forwarded_to address {} (trace_id = {})", forwarded_to_address, bundle.unwrap().trace_id);
+            warn!(
+                "No affected reserves found for forwarded_to address {} (trace_id = {})",
+                forwarded_to_address,
+                bundle.unwrap().trace_id
+            );
             return empty_response;
         }
 
@@ -455,7 +452,12 @@ impl UserReservesCache {
             // It can happen that some assets are affected by the price update (so this won't be caught by previous
             // early returns), but there are neither borrowers nor suppliers for them.
             // There's no need to continue processing over those.
-            warn!("No candidates found for affected reserves {:?} (forwarded_to {}, trace_id = {})", affected_reserves, forwarded_to_address, bundle.unwrap().trace_id);
+            warn!(
+                "No candidates found for affected reserves {:?} (forwarded_to {}, trace_id = {})",
+                affected_reserves,
+                forwarded_to_address,
+                bundle.unwrap().trace_id
+            );
             return empty_response;
         }
 
@@ -467,7 +469,8 @@ impl UserReservesCache {
 
         let unique_candidates: HashSet<UserAddress> =
             duplicate_candidates.clone().into_iter().collect();
-        let candidate_buckets: Vec<Vec<UserAddress>> = bucketize_optimally(unique_candidates.clone());
+        let candidate_buckets: Vec<Vec<UserAddress>> =
+            bucketize_optimally(unique_candidates.clone());
         let bundle_processing_elapsed = bundle_processing.elapsed().as_millis();
         info!(
             trace_id = %bundle.unwrap().trace_id,
@@ -569,30 +572,26 @@ pub async fn has_any_collateral_above_threshold(
     let reserves_data = get_reserves_data(provider.clone()).await?;
     let reserves_data = reserves_data
         .into_iter()
-        .map(|d| {
-            (
-                d.underlyingAsset,
-                d,
-            )
-        })
+        .map(|d| (d.underlyingAsset, d))
         .collect::<HashMap<_, _>>();
 
     let collateral_positions = user_positions
         .into_iter()
         .filter(|p| p.scaled_atoken_balance > U256::ZERO && p.usage_as_collateral_enabled_on_user)
         .collect::<Vec<UserPosition>>();
-    if collateral_positions.len() == 0 {
+    if collateral_positions.is_empty() {
         return Ok(false);
     }
     for position in collateral_positions {
         // get the aToken balance for the underlying asset
-        let a_token = reserves_data.get(&position.underlying_asset).unwrap().aTokenAddress;
+        let a_token = reserves_data
+            .get(&position.underlying_asset)
+            .unwrap()
+            .aTokenAddress;
         let a_token_contract = ERC20::new(a_token, provider.clone());
         let a_token_balance = match a_token_contract.balanceOf(user_address).call().await {
             Ok(balance) => balance.balance,
-            Err(_) => {
-                U256::ZERO
-            }
+            Err(_) => U256::ZERO,
         };
 
         // get the liquidation bonus for the underlying asset
@@ -610,18 +609,18 @@ pub async fn has_any_collateral_above_threshold(
             .unwrap()
             .decimals;
         let raw = a_token_balance.as_limbs()[0] as f64; // Get the lowest limb which is u64, then convert to f64
-        let token_units = raw / 10f64.powi(decimals.try_into().unwrap_or(0));       // normalize the token amount
-        let a_token_balance_in_usd = token_units * (price.to::<u128>() as f64 / 1e8);     // multiply by price, normalize 8 decimals
+        let token_units = raw / 10f64.powi(decimals.try_into().unwrap_or(0)); // normalize the token amount
+        let a_token_balance_in_usd = token_units * (price.to::<u128>() as f64 / 1e8); // multiply by price, normalize 8 decimals
 
         // In normal operation, AAVE applies the liquidation bonus on top of the max available collateral to liquidate
         // for this filter, we apply it on top of the whole user collateral, assuming that if it's not above the profit
         // threshold, then it won't be above the profit threshold with max collateral to liquidate either, and thus discard the user
         let bonus_fraction = (f64::from(liquidation_bonus) - 10000.0) / 100.0;
-        let bonus_in_usd = a_token_balance_in_usd * f64::from(bonus_fraction) / 100.0;
+        let bonus_in_usd = a_token_balance_in_usd * bonus_fraction / 100.0;
         if bonus_in_usd >= min_collateral_in_usd {
-            return Ok(true)
+            return Ok(true);
         };
-    };
+    }
     Ok(false)
 }
 
@@ -664,7 +663,7 @@ async fn get_positions_by_user(
                     Err(e) => {
                         warn!("Couldn't get user account data: {:?}", e);
                         false
-                    },
+                    }
                 };
                 if !has_debt {
                     continue;
@@ -692,8 +691,10 @@ async fn get_positions_by_user(
                             provider.clone(),
                             address,
                             user_positions.clone(),
-                            MIN_COLLATERAL_THRESHOLD_IN_USD
-                        ).await {
+                            MIN_COLLATERAL_THRESHOLD_IN_USD,
+                        )
+                        .await
+                        {
                             Ok(res) => res,
                             Err(_) => continue,
                         };
@@ -757,9 +758,7 @@ fn generate_user_by_position_by_asset(
     user_by_position_by_asset
 }
 
-fn bucketize_optimally(
-    user_addresses: HashSet<UserAddress>,
-) -> Vec<Vec<UserAddress>> {
+fn bucketize_optimally(user_addresses: HashSet<UserAddress>) -> Vec<Vec<UserAddress>> {
     let user_addresses = user_addresses.into_iter().collect::<Vec<_>>();
     let len_addresses = user_addresses.len();
     let num_buckets = match len_addresses {

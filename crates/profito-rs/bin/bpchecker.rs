@@ -3,45 +3,36 @@ use alloy::{
     providers::{IpcConnect, Provider, ProviderBuilder, RootProvider},
     pubsub::PubSubFrontend,
 };
-use ethers_core::{
-    types::H256,
-    utils::hex,
-};
+use ethers_core::{types::H256, utils::hex};
 use overlord_shared::{
     common::get_reserves_data,
     constants::{
-        AAVE_ORACLE_ADDRESS,
-        AAVE_V3_POOL_ADDRESS,
-        AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS,
+        AAVE_ORACLE_ADDRESS, AAVE_V3_POOL_ADDRESS, AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS,
     },
     sol_bindings::{
         pool::AaveV3Pool,
-        AaveOracle, AaveProtocolDataProvider,
-        Foxdie,
+        AaveOracle, AaveProtocolDataProvider, Foxdie,
         IUiPoolDataProviderV3::{AggregatedReserveData, UserReserveData},
-    }
+    },
 };
 use profito_rs::{
     cache::PriceCache,
     calculations::{
-        BRIBE_IN_BASIS_POINTS,
-        BestPair,
-        estimate_gas,
-        get_best_liquidity_provider,
-        percent_div,
-        percent_mul,
-        calculate_actual_debt_to_liquidate,
-        calculate_user_balances,
-        get_reserves_list,
-        calculate_user_account_data,
-        calculate_best_swap_fees,
+        calculate_actual_debt_to_liquidate, calculate_best_swap_fees, calculate_user_account_data,
+        calculate_user_balances, estimate_gas, get_best_liquidity_provider, get_reserves_list,
+        percent_div, percent_mul, BestPair, BRIBE_IN_BASIS_POINTS,
     },
-    utils::{ReserveConfigurationEnhancedData, generate_reserve_details_by_asset, get_user_reserves_data},
+    utils::{
+        generate_reserve_details_by_asset, get_user_reserves_data, ReserveConfigurationEnhancedData,
+    },
 };
 use std::{collections::HashMap, env, sync::Arc};
 use tokio::sync::Mutex;
 
-async fn get_user_health_factor(provider: Arc<RootProvider<PubSubFrontend>>, user: Address) -> U256 {
+async fn get_user_health_factor(
+    provider: Arc<RootProvider<PubSubFrontend>>,
+    user: Address,
+) -> U256 {
     let pool = AaveV3Pool::new(AAVE_V3_POOL_ADDRESS, provider.clone());
     match pool.getUserAccountData(user).call().await {
         Ok(account_data) => account_data.healthFactor,
@@ -124,7 +115,11 @@ async fn calculate_available_collateral_to_liquidate(
     let debt_amount_needed: U256;
     if max_collateral_to_liquidate > user_collateral_balance {
         collateral_amount = user_collateral_balance;
-        debt_amount_needed = percent_div((collateral_asset_price * collateral_amount * debt_asset_unit) / (debt_asset_price * collateral_asset_unit), liquidation_bonus);
+        debt_amount_needed = percent_div(
+            (collateral_asset_price * collateral_amount * debt_asset_unit)
+                / (debt_asset_price * collateral_asset_unit),
+            liquidation_bonus,
+        );
     } else {
         collateral_amount = max_collateral_to_liquidate;
         debt_amount_needed = debt_to_cover;
@@ -184,7 +179,10 @@ async fn calculate_available_collateral_to_liquidate(
         "\t\t\tdebt in collateral units: {}",
         debt_in_collateral_units
     );
-    println!("\t\t\texecution gas cost (used, price, total): {}, {}, {}", gas_used, gas_price, execution_gas_cost);
+    println!(
+        "\t\t\texecution gas cost (used, price, total): {}, {}, {}",
+        gas_used, gas_price, execution_gas_cost
+    );
     println!("\t\t\tswap total cost: {}", swap_total_cost);
     println!("\t\t\tnet profit = col amount - debt in col units - execution cost - swap cost = {} ($ {})", net_profit, format_units(net_profit * collateral_asset_price, 8 + u8::try_from(collateral_decimals).unwrap()).unwrap());
 
@@ -236,24 +234,22 @@ async fn get_best_liquidation_opportunity(
             );
 
             // begin section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L234-L238
-            let (
-                collateral_reserve,
-                user_collateral_balance,
-                debt_reserve,
-                user_reserve_debt
-            ) = match calculate_user_balances(
-                reserves_data.clone(),
-                supplied_reserve,
-                borrowed_reserve,
-                provider.clone(),
-                user_address,
-            ).await {
-                Ok(result) => result,
-                Err(e) => {
-                    eprintln!("Error calculating user balances: {}", e);
-                    continue;
-                }
-            };
+            let (collateral_reserve, user_collateral_balance, debt_reserve, user_reserve_debt) =
+                match calculate_user_balances(
+                    reserves_data.clone(),
+                    supplied_reserve,
+                    borrowed_reserve,
+                    provider.clone(),
+                    user_address,
+                )
+                .await
+                {
+                    Ok(result) => result,
+                    Err(e) => {
+                        eprintln!("Error calculating user balances: {}", e);
+                        continue;
+                    }
+                };
             // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L234-L238
             println!(
                 "\t\tv3.3 (user_collateral_balance, user_reserve_debt): {} / {}",
@@ -330,9 +326,13 @@ async fn get_best_liquidation_opportunity(
             let best_liquidity_provider = get_best_liquidity_provider(
                 provider.clone(),
                 borrowed_reserve.underlyingAsset,
-                actual_debt_to_liquidate
-            ).await;
-            println!("\t\ttake liquidity from {:?}", best_liquidity_provider.source);
+                actual_debt_to_liquidate,
+            )
+            .await;
+            println!(
+                "\t\ttake liquidity from {:?}",
+                best_liquidity_provider.source
+            );
             for reason in best_liquidity_provider.reasons.iter() {
                 println!("\t\t\t- {}", reason);
             }
@@ -405,7 +405,10 @@ fn print_foxdie_local_testing_instructions(
         weth_to_debt_fee.to_string()
     );
     println!("export BUILDER_BRIBE={} && \\", "0"); // TODO
-    println!("export FLASH_LOAN_SOURCE={:?} && \\", best.flash_loan_source as u8);
+    println!(
+        "export FLASH_LOAN_SOURCE={:?} && \\",
+        best.flash_loan_source as u8
+    );
     println!("forge test --match-test testLiquidation -vvvvv --gas-report");
     println!("\n##################################################");
 }
@@ -462,8 +465,9 @@ async fn main() {
     let user_reserves_data = get_user_reserves_data(provider.clone(), user_address).await;
 
     // Create reserve configuration struct
-    let reserves_configuration =
-        generate_reserve_details_by_asset(provider.clone()).await.unwrap();
+    let reserves_configuration = generate_reserve_details_by_asset(provider.clone())
+        .await
+        .unwrap();
     let assets_borrowed = user_reserves_data
         .iter()
         .filter(|reserve| reserve.scaledVariableDebt > U256::ZERO)
@@ -490,18 +494,17 @@ async fn main() {
     let price_cache = Arc::new(Mutex::new(PriceCache::new(0)));
 
     // Calculate user account data
-    let (
-        total_collateral_in_base_currency,
-        total_debt_in_base_currency,
-        health_factor_v33
-    ) = match calculate_user_account_data(
+    let (total_collateral_in_base_currency, total_debt_in_base_currency, health_factor_v33) =
+        match calculate_user_account_data(
             price_cache.clone(),
             provider.clone(),
             user_address,
             reserves_list.clone(),
             reserves_data.clone(),
             None,
-        ).await {
+        )
+        .await
+        {
             Ok((collateral, debt, hf)) => (collateral, debt, hf),
             Err(e) => {
                 eprintln!("Error calculating user account data: {}", e);
@@ -581,7 +584,9 @@ async fn main() {
         user_address,
         health_factor_v33,
         total_debt_in_base_currency,
-    ).await {
+    )
+    .await
+    {
         let debt_symbol = reserves_configuration
             .get(&best.debt_asset)
             .unwrap()
@@ -611,7 +616,7 @@ async fn main() {
             .ok()
             .and_then(|hash| hash.parse::<H256>().ok())
             .unwrap_or_else(|| H256::zero());
-        
+
         print_foxdie_local_testing_instructions(
             best.clone(),
             &debt_symbol,

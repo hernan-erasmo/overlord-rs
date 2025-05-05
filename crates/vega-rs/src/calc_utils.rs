@@ -4,10 +4,7 @@ use alloy::{
     pubsub::PubSubFrontend,
 };
 use futures::future::join_all;
-use overlord_shared::{
-    sol_bindings::pool::AaveV3Pool,
-    UnderwaterUserEvent
-};
+use overlord_shared::{sol_bindings::pool::AaveV3Pool, UnderwaterUserEvent};
 use std::{collections::HashMap, sync::Arc};
 use tokio::{sync::broadcast, task};
 use tracing::warn;
@@ -84,7 +81,9 @@ pub async fn get_hf_for_users(
                 let result = pool.getUserAccountData(address).call().await;
                 match result {
                     Ok(data) => {
-                        if data.healthFactor < U256::from(HF_MIN_THRESHOLD) && data.totalCollateralBase > U256::from(MIN_REPORTABLE_COLLATERAL) {
+                        if data.healthFactor < U256::from(HF_MIN_THRESHOLD)
+                            && data.totalCollateralBase > U256::from(MIN_REPORTABLE_COLLATERAL)
+                        {
                             if let Some(bus) = &event_bus {
                                 bus.send(UnderwaterUserEvent {
                                     address,

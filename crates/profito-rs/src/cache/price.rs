@@ -51,7 +51,7 @@ impl PriceCache {
         }
 
         // Get or create the prices HashMap for this trace_id
-        let prices = self.prices.entry(trace_id.clone()).or_insert_with(|| HashMap::new());
+        let prices = self.prices.entry(trace_id.clone()).or_default();
 
         for (reserve, symbol, new_price) in new_prices_by_asset.iter() {
             prices.insert(*reserve, *new_price);
@@ -115,6 +115,10 @@ impl PriceCache {
 
             return Ok(price);
         }
-        Err(format!("price for {} within trace_id {} not found in the price cache", reserve, trace_id).into())
+        Err(format!(
+            "price for {} within trace_id {} not found in the price cache",
+            reserve, trace_id
+        )
+        .into())
     }
 }

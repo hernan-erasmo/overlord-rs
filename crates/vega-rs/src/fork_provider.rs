@@ -130,10 +130,7 @@ impl ForkProvider {
         // Step 2: Spin up the anvil fork at the given block
         // Any error raised after this line must properly close the anvil process
         // or it will become a zombie
-        let fork_path = format!(
-            "./fork_{}.ipc",
-            trace_id,
-        );
+        let fork_path = format!("./fork_{}.ipc", trace_id,);
         let ipc_fork_file = Arc::new(IpcForkFile::new(fork_path.clone()));
         let result = panic::catch_unwind(|| {
             Anvil::new()
@@ -156,15 +153,17 @@ impl ForkProvider {
         };
         info!(
             "Anvil fork started at block {:?} for bundle {}",
-            block_number_to_be_forked,
-            trace_id,
+            block_number_to_be_forked, trace_id,
         );
         // Step 3: Get a provider from the fork
         let fork_ipc = IpcConnect::new(fork_path.to_string());
         let fork_provider: AnvilForkProvider = match ProviderBuilder::new().on_ipc(fork_ipc).await {
             Ok(provider) => Ok(provider),
             Err(e) => {
-                error!("Failed to connect to fork IPC for bundle {}: {:?}", trace_id, e);
+                error!(
+                    "Failed to connect to fork IPC for bundle {}: {:?}",
+                    trace_id, e
+                );
                 Self::cleanup_anvil_instance(&mut anvil);
                 return Err("Failed to connect to fork IPC".to_string());
             }
@@ -172,15 +171,20 @@ impl ForkProvider {
         // Step 4: Apply the price update to the fork
         if let Some(bundle) = bundle {
             // Step 4.0: Fund the account the tx comes from, to prevent failures when applying the tx
-            match fork_provider.as_ref().unwrap().anvil_set_balance(
-                bundle.tx_from,
-                U256::from(1e20),
-            ).await {
+            match fork_provider
+                .as_ref()
+                .unwrap()
+                .anvil_set_balance(bundle.tx_from, U256::from(1e20))
+                .await
+            {
                 Ok(_) => {
                     info!("Funded account {} for bundle {}", bundle.tx_from, trace_id);
                 }
                 Err(e) => {
-                    error!("Failed to fund account {} for bundle {}: {:?}", bundle.tx_from, trace_id, e);
+                    error!(
+                        "Failed to fund account {} for bundle {}: {:?}",
+                        bundle.tx_from, trace_id, e
+                    );
                     Self::cleanup_anvil_instance(&mut anvil);
                     return Err("Failed to fund account".to_string());
                 }
@@ -202,7 +206,10 @@ impl ForkProvider {
             {
                 Ok(response) => response,
                 Err(e) => {
-                    error!("Failed to send price update tx to fork for bundle {}: {:?}", trace_id, e);
+                    error!(
+                        "Failed to send price update tx to fork for bundle {}: {:?}",
+                        trace_id, e
+                    );
                     Self::cleanup_anvil_instance(&mut anvil);
                     return Err("Failed to send price update tx to fork".to_string());
                 }
@@ -211,7 +218,10 @@ impl ForkProvider {
             match pending_tx.get_receipt().await {
                 Ok(receipt) => receipt,
                 Err(e) => {
-                    error!("Failed to get receipt for price update tx for bundle {}: {:?}", trace_id, e);
+                    error!(
+                        "Failed to get receipt for price update tx for bundle {}: {:?}",
+                        trace_id, e
+                    );
                     Self::cleanup_anvil_instance(&mut anvil);
                     return Err("Failed to get receipt for price update tx".to_string());
                 }
