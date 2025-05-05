@@ -96,6 +96,7 @@ pub static GHO_ADAPTER: Lazy<Vec<Address>> = Lazy::new(|| {
 pub static PENDLE_PRICE_CAP_ADAPTERS: Lazy<Vec<Address>> = Lazy::new(|| {
     let oracles = vec![
         address!("5292AB3292D076271f853Ed8e05e61cc02F0A2C6"),
+        address!("759B9B72700A129CD7AD8e53F9c99cb48Fd57105"),
     ];
     oracles
 });
