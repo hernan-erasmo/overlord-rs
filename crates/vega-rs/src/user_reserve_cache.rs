@@ -10,7 +10,7 @@ use overlord_shared::{
     sol_bindings::{pool::AaveV3Pool, AaveOracle, AaveUIPoolDataProvider, ERC20},
     PriceUpdateBundle, WhistleblowerEventType, WhistleblowerUpdate,
 };
-use rand::seq::{IndexedRandom, SliceRandom};
+use rand::seq::IndexedRandom;
 use serde_json::json;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -579,7 +579,7 @@ pub async fn has_any_collateral_above_threshold(
         .into_iter()
         .filter(|p| p.scaled_atoken_balance > U256::ZERO && p.usage_as_collateral_enabled_on_user)
         .collect::<Vec<UserPosition>>();
-    if collateral_positions.len() == 0 {
+    if collateral_positions.is_empty() {
         return Ok(false);
     }
     for position in collateral_positions {
@@ -616,7 +616,7 @@ pub async fn has_any_collateral_above_threshold(
         // for this filter, we apply it on top of the whole user collateral, assuming that if it's not above the profit
         // threshold, then it won't be above the profit threshold with max collateral to liquidate either, and thus discard the user
         let bonus_fraction = (f64::from(liquidation_bonus) - 10000.0) / 100.0;
-        let bonus_in_usd = a_token_balance_in_usd * f64::from(bonus_fraction) / 100.0;
+        let bonus_in_usd = a_token_balance_in_usd * bonus_fraction / 100.0;
         if bonus_in_usd >= min_collateral_in_usd {
             return Ok(true);
         };

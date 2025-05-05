@@ -54,7 +54,7 @@ async fn run_price_update_pipeline(
     let (address_buckets, affected_reserves) = cache.get_candidates_for_bundle(bundle).await;
     let trace_id = bundle.map_or("initial-run".to_string(), |b| b.trace_id.clone());
     let tx_hash = bundle.map_or("initial-run".to_string(), |b| b.tx_hash.clone());
-    let raw_tx = bundle.map_or(None, |b| b.raw_tx.clone());
+    let raw_tx = bundle.and_then(|b| b.raw_tx.clone());
     let inclusion_block = bundle.map_or("initial-run".to_string(), |b| b.inclusion_block.clone());
     if address_buckets.len() == 1 && address_buckets[0].is_empty() {
         info!(
