@@ -24,6 +24,7 @@ use tokio::{
 use tracing::{error, info, warn};
 use tracing_appender::rolling::{self, Rotation};
 use tracing_subscriber::fmt::{time::LocalTime, writer::BoxMakeWriter};
+use futures::stream::FuturesUnordered;
 
 mod sol_bindings;
 use sol_bindings::{forwardCall, transmitCall, transmitSecondaryCall, ForwardToDestination};
@@ -221,39 +222,83 @@ fn is_transmit_call(tx_body: &Transaction) -> bool {
 async fn collect_transmitters(
     provider: Arc<RootProvider<PubSubFrontend>>,
 ) -> Result<Vec<Address>, Box<dyn Error>> {
-    let mut collected_transmitters = vec![];
-    let mut aggregator_to_oracle_map = HashMap::new();
-    
     let reserves = match get_reserves_data(provider.clone()).await {
         Ok(response) => response,
         Err(e) => return Err(format!("Error fetching reserves data in collect_transmitters(): {}", e).into())
     };
     
+    info!("Resolving {} aggregators concurrently", reserves.len());
+
+    // Create a collection to store our tasks
+    let mut aggregator_tasks = FuturesUnordered::new();
+
+    // Start all aggregator resolution tasks
     for reserve in reserves.iter() {
-        info!("Resolving aggregator for {} [{}/{}]", &reserve.symbol, reserves.iter().position(|r| r.symbol == reserve.symbol).unwrap_or(0) + 1, reserves.len());
-        let aggregator_address = match resolve_aggregator(provider.clone(), reserve.priceOracle).await {
-            Ok(addr) => {
-                if addr == GHO_PRICE_ORACLE {
-                    continue
+        let provider_clone = provider.clone();
+        let price_oracle = reserve.priceOracle;
+        let symbol = reserve.symbol.clone();
+
+        // Spawn each task into the FuturesUnordered collection
+        aggregator_tasks.push(async move {
+            info!("Resolving aggregator for {}", &symbol);
+
+            // First get the aggregator address
+            let addr = match resolve_aggregator(provider_clone.clone(), price_oracle).await {
+                Ok(addr) => addr,
+                Err(e) => return Err(format!("resolve_aggregator() call failed for {}: {}", symbol, e).into())
+            };
+
+            if addr == GHO_PRICE_ORACLE {
+                return Ok::<(Option<Address>, Option<(Address, Address)>), Box<dyn Error + Send + Sync>>((None, None));
+            }
+
+            // Then get the actual aggregator from the proxy
+            let agg_address = match EACAggregatorProxy::new(addr, provider_clone.clone()).aggregator().call().await {
+                Ok(agg) => agg._0,
+                Err(e) => return Err(format!("Couldn't get aggregator() from address {} (price oracle: {}): {}", 
+                                            addr, price_oracle, e).into())
+            };
+
+            // Return the aggregator and the mapping information
+            Ok::<(Option<Address>, Option<(Address, Address)>), Box<dyn Error + Send + Sync>>(
+                (Some(agg_address), Some((agg_address, price_oracle)))
+            )
+        });
+    }
+
+    // Results collection
+    let mut collected_transmitters = Vec::new();
+    let mut aggregator_to_oracle_map = HashMap::new();
+
+    // Process aggregator tasks as they complete
+    while let Some(result) = aggregator_tasks.next().await {
+        match result {
+            Ok((Some(aggregator_address), Some((agg_addr, price_oracle)))) => {
+                // Add to our mapping
+                aggregator_to_oracle_map.insert(format!("{:#x}", agg_addr), format!("{:#x}", price_oracle));
+                
+                // Now start the transmitters task
+                let provider_clone = provider.clone();
+                let agg_address = aggregator_address;
+                
+                // We could add this to another FuturesUnordered collection, but since we already have
+                // the aggregator address, let's just execute it in sequence to keep the code simpler
+                match AccessControlledOCR2Aggregator::new(agg_address, provider_clone).getTransmitters().call().await {
+                    Ok(response) => {
+                        collected_transmitters.extend(response._0);
+                    },
+                    Err(e) => {
+                        return Err(format!("Couldn't get transmitters from aggregator {}: {}", agg_address, e).into())
+                    }
                 }
-                let agg_address = match EACAggregatorProxy::new(addr, provider.clone()).aggregator().call().await {
-                    Ok(agg) => agg._0,
-                    Err(e) => return Err(format!("Couldn't get aggregator() from address {} (price oracle: {}): {}", addr, reserve.priceOracle, e).into())
-                };
-                
-                // Store the mapping between aggregator and oracle
-                aggregator_to_oracle_map.insert(format!("{:#x}", agg_address), format!("{:#x}", reserve.priceOracle));
-                
-                agg_address
             },
-            Err(e) => return Err(format!("Error fetching aggregator for oracle {}: {}", reserve.priceOracle, e).into())
-        };
-        
-        let transmitters = match AccessControlledOCR2Aggregator::new(aggregator_address, provider.clone()).getTransmitters().call().await {
-            Ok(response) => response._0,
-            Err(e) => return Err(format!("Couldn't get transmitters from aggregator {}: {}", aggregator_address, e).into())
-        };
-        collected_transmitters.extend(transmitters);
+            Ok((None, None)) => {
+                // This was a GHO_PRICE_ORACLE, skip it
+                continue;
+            },
+            Err(e) => return Err(e),
+            _ => continue,  // Other combinations shouldn't happen, but just in case
+        }
     }
 
     // Generate the JSON file with the mapping
@@ -266,7 +311,7 @@ async fn collect_transmitters(
         },
         Err(e) => error!("Failed to serialize aggregator to oracle mapping: {}", e)
     }
-    
+
     // Remove duplicates using a HashSet
     let unique_transmitters: std::collections::HashSet<_> = collected_transmitters.into_iter().collect();
     info!("Found {} unique transmitters", unique_transmitters.len());
