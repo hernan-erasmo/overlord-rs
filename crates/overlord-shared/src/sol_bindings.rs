@@ -113,6 +113,15 @@ sol!(
     "src/abis/aggregators/AccessControlledOCR2Aggregator.json"
 );
 
+sol!(
+    #[allow(missing_docs)]
+    #[allow(clippy::too_many_arguments)]
+    #[sol(rpc)]
+    #[derive(Debug)]
+    AuthorizedForwarder,
+    "src/abis/AuthorizedForwarder.json"
+);
+
 pub mod WstETHAggregator {
     use alloy::sol;
     sol!(
