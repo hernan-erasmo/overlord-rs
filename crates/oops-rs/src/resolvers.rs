@@ -5,9 +5,6 @@ use once_cell::sync::Lazy;
 
 use overlord_shared::sol_bindings::{sDAIAggregator::sDAISynchronicityPriceAdapter, CLSynchronicityPriceAdapterPegToBase, CbETHAggregator::CbETHPriceCapAdapter, EBTCAggregator::EBTCPriceCapAdapter, EthXAggregator::EthXPriceCapAdapter, OsETHAggregator::OsETHPriceCapAdapter, PendlePriceCapAggregator::PendlePriceCapAdapter, PriceCapAdapterStable, RETHAggregator::RETHPriceCapAdapter, RsETHAggregator::RsETHPriceCapAdapter, SUSDeAggregator::SUSDePriceCapAdapter, WeETHAggregator::WeETHPriceCapAdapter, WstETHAggregator::WstETHPriceCapAdapter};
 
-use std::future::Future;
-type ResolverFunction = fn(Arc<RootProvider<PubSubFrontend>>, Address) -> Box<dyn Future<Output = Address> + Send + 'static>;
-
 /// These are living data structures, in the sense that will need to be updated if a new asset is onboarded
 /// into AAVE v3.
 /// If we don't have a resolver for that type, then a resolver function would need to be added as well,
