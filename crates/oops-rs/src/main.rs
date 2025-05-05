@@ -5,18 +5,24 @@ use ethers_core::abi::{decode, ParamType};
 use mev_share_sse::{client::EventStream, Event as MevShareEvent, EventClient};
 use futures_util::StreamExt;
 use lru::LruCache;
-use overlord_shared::{common::get_reserves_data, constants::GHO_PRICE_ORACLE, sol_bindings::{AccessControlledOCR2Aggregator, EACAggregatorProxy}, MessageBundle, NewPrice, PriceUpdateBundle};
+use overlord_shared::{
+    common::get_reserves_data,
+    constants::GHO_PRICE_ORACLE,
+    sol_bindings::{
+        AccessControlledOCR2Aggregator, AuthorizedForwarder, EACAggregatorProxy, IUiPoolDataProviderV3::AggregatedReserveData
+    },
+    MessageBundle,
+    NewPrice,
+    PriceUpdateBundle
+};
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     error::Error,
-    fs::File,
-    io::{self, BufRead},
     num::NonZeroUsize,
-    path::Path,
-    str::FromStr, sync::Arc,
+    sync::Arc,
 };
-use serde_json::json;
+
 use tokio::{
     sync::broadcast,
     time::{sleep, Duration},
@@ -35,7 +41,6 @@ use resolvers::resolve_aggregator;
 const IPC_URL: &str = "/tmp/reth.ipc";
 const MEV_SHARE_MAINNET_SSE_URL: &str = "https://mev-share.flashbots.net";
 const SECONDS_BEFORE_RECONNECTION: u64 = 2;
-const PATH_TO_ADDRESSES_INPUT: &str = "crates/oops-rs/addresses.txt";
 const VEGA_INBOUND_ENDPOINT: &str = "ipc:///tmp/vega_inbound";
 const OOPS_PRICE_CACHE_SIZE: usize = 10;
 
@@ -136,27 +141,6 @@ fn get_price_from_input(tx_input: &Bytes) -> Result<NewPrice, Box<dyn Error>> {
     )
 }
 
-/// This function reads the file of addresses we identified as senders of
-/// new price updates, so that we can filter pending transactions coming from these.
-fn read_addresses_from_file(filename: &str) -> io::Result<Vec<alloy::primitives::Address>> {
-    let path = Path::new(filename);
-    let file = File::open(path)?;
-    let reader = io::BufReader::new(file);
-
-    let mut addresses = Vec::new();
-    for line in reader.lines() {
-        let line = line?;
-        match Address::from_str(line.trim()) {
-            Ok(address) => addresses.push(address),
-            Err(e) => {
-                error!("Failed to parse address from line '{}': {}", line, e);
-                continue;
-            }
-        };
-    }
-    Ok(addresses)
-}
-
 /// Check if the input data of a transaction is a call to the `transmit` function
 ///
 /// The `transmit` function is defined in OCR2Aggregator.sol as:
@@ -210,6 +194,55 @@ fn is_transmit_call(tx_body: &Transaction) -> bool {
     selector_chunk.starts_with(&transmit_selector)
 }
 
+async fn task_get_transmitters(
+    provider_clone: Arc<RootProvider<PubSubFrontend>>,
+    price_oracle: Address,
+    symbol: String,
+) -> Result<Option<Vec<Address>>, Box<dyn Error + Send + Sync>> {
+    info!("Resolving aggregator for {}", &symbol);
+
+    // First get the aggregator address
+    // This can be anywhere from 1 to 3 or 4 RPC calls
+    let addr = match resolve_aggregator(provider_clone.clone(), price_oracle).await {
+        Ok(addr) => addr,
+        Err(e) => return Err(format!("resolve_aggregator() call failed for {}: {}", symbol, e).into())
+    };
+
+    if addr == GHO_PRICE_ORACLE {
+        return Ok(Some(vec![]));
+    }
+
+    // Then get the actual aggregator from the proxy
+    // 1 RPC call
+    let agg_address = match EACAggregatorProxy::new(addr, provider_clone.clone()).aggregator().call().await {
+        Ok(agg) => agg._0,
+        Err(e) => return Err(format!("Couldn't get aggregator() from address {} (price oracle: {}): {}",
+                                    addr, price_oracle, e).into())
+    };
+
+    let transmitters = match AccessControlledOCR2Aggregator::new(agg_address, provider_clone).getTransmitters().call().await {
+        Ok(response) => response._0,
+        Err(e) => {
+            return Err(format!("Couldn't get transmitters from aggregator {}: {}", agg_address, e).into())
+        }
+    };
+
+    // Return the transmitters
+    Ok(Some(transmitters))
+}
+
+/// Get authorized senders from a transmitter address
+async fn task_get_authorized_senders(
+    provider: Arc<RootProvider<PubSubFrontend>>,
+    transmitter: Address
+) -> Result<Vec<Address>, Box<dyn Error + Send + Sync>> {
+    info!("Getting authorized senders from transmitter {:?}", transmitter);
+    match AuthorizedForwarder::new(transmitter, provider).getAuthorizedSenders().call().await {
+        Ok(result) => Ok(result._0),
+        Err(e) => Err(format!("Failed to get authorized senders from transmitter {:?}: {}", transmitter, e).into())
+    }
+}
+
 /// Get the list of addresses that we will listen to for new price updates
 ///
 /// 1. Collect all values from each item in AAVE_V3_UI_POOL_DATA's `getReservesData(AAVE_V3_PROVIDER_ADDRESS)`
@@ -222,14 +255,20 @@ fn is_transmit_call(tx_body: &Transaction) -> bool {
 async fn collect_transmitters(
     provider: Arc<RootProvider<PubSubFrontend>>,
 ) -> Result<Vec<Address>, Box<dyn Error>> {
+    // one RPC call
     let reserves = match get_reserves_data(provider.clone()).await {
         Ok(response) => response,
         Err(e) => return Err(format!("Error fetching reserves data in collect_transmitters(): {}", e).into())
     };
-    
+
+    // Create a HashMap that maps price oracles to their respective reserve data
+    let mut reserves_mapping: HashMap<Address, AggregatedReserveData> = HashMap::new();
+    for reserve in reserves.iter().cloned() {
+        reserves_mapping.insert(reserve.priceOracle, reserve);
+    }
+
     info!("Resolving {} aggregators concurrently", reserves.len());
 
-    // Create a collection to store our tasks
     let mut aggregator_tasks = FuturesUnordered::new();
 
     // Start all aggregator resolution tasks
@@ -239,103 +278,58 @@ async fn collect_transmitters(
         let symbol = reserve.symbol.clone();
 
         // Spawn each task into the FuturesUnordered collection
-        aggregator_tasks.push(async move {
-            info!("Resolving aggregator for {}", &symbol);
-
-            // First get the aggregator address
-            let addr = match resolve_aggregator(provider_clone.clone(), price_oracle).await {
-                Ok(addr) => addr,
-                Err(e) => return Err(format!("resolve_aggregator() call failed for {}: {}", symbol, e).into())
-            };
-
-            if addr == GHO_PRICE_ORACLE {
-                return Ok::<(Option<Address>, Option<(Address, Address)>), Box<dyn Error + Send + Sync>>((None, None));
-            }
-
-            // Then get the actual aggregator from the proxy
-            let agg_address = match EACAggregatorProxy::new(addr, provider_clone.clone()).aggregator().call().await {
-                Ok(agg) => agg._0,
-                Err(e) => return Err(format!("Couldn't get aggregator() from address {} (price oracle: {}): {}", 
-                                            addr, price_oracle, e).into())
-            };
-
-            // Return the aggregator and the mapping information
-            Ok::<(Option<Address>, Option<(Address, Address)>), Box<dyn Error + Send + Sync>>(
-                (Some(agg_address), Some((agg_address, price_oracle)))
-            )
-        });
+        aggregator_tasks.push(task_get_transmitters(
+            provider_clone,
+            price_oracle,
+            symbol,
+        ));
     }
 
-    // Results collection
-    let mut collected_transmitters = Vec::new();
-    let mut aggregator_to_oracle_map = HashMap::new();
+    // Track unique transmitters to avoid duplicate calls
+    let mut unique_transmitters = HashSet::new();
+    let mut sender_tasks = FuturesUnordered::new();
+    let mut collected_authorized_forwarders = Vec::new();
 
     // Process aggregator tasks as they complete
     while let Some(result) = aggregator_tasks.next().await {
         match result {
-            Ok((Some(aggregator_address), Some((agg_addr, price_oracle)))) => {
-                // Add to our mapping
-                aggregator_to_oracle_map.insert(format!("{:#x}", agg_addr), format!("{:#x}", price_oracle));
-                
-                // Now start the transmitters task
-                let provider_clone = provider.clone();
-                let agg_address = aggregator_address;
-                
-                // We could add this to another FuturesUnordered collection, but since we already have
-                // the aggregator address, let's just execute it in sequence to keep the code simpler
-                match AccessControlledOCR2Aggregator::new(agg_address, provider_clone).getTransmitters().call().await {
-                    Ok(response) => {
-                        collected_transmitters.extend(response._0);
-                    },
-                    Err(e) => {
-                        return Err(format!("Couldn't get transmitters from aggregator {}: {}", agg_address, e).into())
+            Ok(Some(transmitters)) => {
+                for transmitter in transmitters {
+                    // Skip if we've already processed this transmitter
+                    if unique_transmitters.insert(transmitter) {
+                        // Only process new/unique transmitters
+                        let provider_clone = provider.clone();
+                        sender_tasks.push(task_get_authorized_senders(provider_clone, transmitter));
+                    } else {
+                        info!("Authorized senders for transmitter {} already accounted for", transmitter);
                     }
                 }
             },
-            Ok((None, None)) => {
+            Ok(None) => {
                 // This was a GHO_PRICE_ORACLE, skip it
                 continue;
             },
-            Err(e) => return Err(e),
-            _ => continue,  // Other combinations shouldn't happen, but just in case
+            Err(e) => return Err(e)
         }
     }
 
-    // Generate the JSON file with the mapping
-    match serde_json::to_string_pretty(&aggregator_to_oracle_map) {
-        Ok(json_str) => {
-            match std::fs::write("aggregator_to_oracle_map.json", json_str) {
-                Ok(_) => info!("Successfully wrote aggregator to oracle mapping to aggregator_to_oracle_map.json"),
-                Err(e) => error!("Failed to write aggregator to oracle mapping file: {}", e)
+    // Process all the sender tasks
+    info!("Processing {} unique transmitters to get authorized senders", sender_tasks.len());
+    while let Some(result) = sender_tasks.next().await {
+        match result {
+            Ok(senders) => {
+                collected_authorized_forwarders.extend(senders);
+            },
+            Err(e) => {
+                // Log error but continue with other transmitters
+                error!("Error getting authorized senders: {}", e);
             }
-        },
-        Err(e) => error!("Failed to serialize aggregator to oracle mapping: {}", e)
-    }
-
-    // Remove duplicates using a HashSet
-    let unique_transmitters: std::collections::HashSet<_> = collected_transmitters.into_iter().collect();
-    info!("Found {} unique transmitters", unique_transmitters.len());
-    Ok(unique_transmitters.into_iter().collect())
-}
-
-/// Get the list of addresses thah we will listen to for new price updates
-fn _init_addresses(file_path: String) -> Result<Vec<Address>, Box<dyn Error>> {
-    let allowed_addresses = match read_addresses_from_file(&file_path) {
-        Ok(addresses) => addresses,
-        Err(e) => {
-            error!("Failed to read addresses from file: {}", e);
-            return Err(Box::new(e));
         }
-    };
-    info!(
-        "Addresses to listen for price updates: [{}]",
-        allowed_addresses
-            .iter()
-            .map(|addr| format!("{addr:?}"))
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
-    Ok(allowed_addresses)
+    }
+    // Remove duplicates from collected authorized forwarders
+    let unique_forwarders: HashSet<_> = collected_authorized_forwarders.drain(..).collect();
+    collected_authorized_forwarders = unique_forwarders.into_iter().collect();
+    Ok(collected_authorized_forwarders)
 }
 
 fn _setup_logging() {
@@ -423,15 +417,6 @@ async fn create_mev_share_stream() -> Result<EventStream<mev_share_sse::Event>, 
 #[tokio::main]
 async fn main() {
     _setup_logging();
-
-    // Replace this for collect_transmitters() once it's done
-    let allowed_addresses = match _init_addresses(String::from(PATH_TO_ADDRESSES_INPUT)) {
-        Ok(addresses) => addresses,
-        Err(e) => {
-            error!("Failed to initialize addresses: {}", e);
-            std::process::exit(1);
-        }
-    };
 
     let new_price_cache: LruCache<NewPrice, ()> = LruCache::new(NonZeroUsize::new(OOPS_PRICE_CACHE_SIZE).unwrap());
     info!("Price cache initialized with size: {}", OOPS_PRICE_CACHE_SIZE);
@@ -521,7 +506,7 @@ async fn main() {
         });
 
         let processor_handle = tokio::spawn({
-            let allowed_addresses = allowed_addresses.clone();
+            let allowed_addresses = transmitters.clone();
             let provider_clone = provider.clone();
             let vega_context = zmq::Context::new();
             let vega_socket = vega_context.socket(zmq::PUSH).unwrap();
