@@ -401,7 +401,7 @@ async fn get_user_debt_in_base_currency(
         }
     };
     user_total_debt = ray_mul(user_total_debt, normalized_debt) * asset_price;
-    return user_total_debt / asset_unit;
+    user_total_debt / asset_unit
 }
 
 /// https://github.com/aave-dao/aave-v3-origin/blob/a0512f8354e97844a3ed819cf4a9a663115b8e20/src/contracts/protocol/libraries/math/WadRayMath.sol#L65
@@ -665,11 +665,11 @@ pub async fn estimate_gas(provider: Arc<RootProvider<PubSubFrontend>>) -> (U256,
         Ok(price) => U256::from(price) / U256::from(1e3),
         _ => U256::MAX,
     };
-    return (
+    (
         default_gas_used,
         gas_price_in_gwei,
         default_gas_used * gas_price_in_gwei / U256::from(1000000),
-    );
+    )
     /*
     match Foxdie::new(FOXDIE_ADDRESS, provider.clone())
         .triggerLiquidation(Foxdie::LiquidationParams {
@@ -794,7 +794,7 @@ async fn calculate_available_collateral_to_liquidate(
 /// Returns the appropriate bribe based on the amount earned
 pub fn calculate_bribe() -> U256 {
     // From 0 to 9999
-    return U256::from(BRIBE_IN_BASIS_POINTS);
+    U256::from(BRIBE_IN_BASIS_POINTS)
 }
 
 /// Not exactly the same as the one from bpchecker
