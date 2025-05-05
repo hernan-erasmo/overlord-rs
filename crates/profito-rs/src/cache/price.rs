@@ -54,7 +54,7 @@ impl PriceCache {
         let prices = self
             .prices
             .entry(trace_id.clone())
-            .or_insert_with(HashMap::new);
+            .or_default();
 
         for (reserve, symbol, new_price) in new_prices_by_asset.iter() {
             prices.insert(*reserve, *new_price);

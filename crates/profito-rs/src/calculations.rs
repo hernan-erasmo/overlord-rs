@@ -545,14 +545,13 @@ pub async fn calculate_user_account_data(
         avg_liquidation_threshold = U256::ZERO;
     }
 
-    let health_factor;
-    if total_debt_in_base_currency != U256::ZERO {
+    let health_factor = if total_debt_in_base_currency != U256::ZERO {
         let wad_numerator =
             percent_mul(total_collateral_in_base_currency, avg_liquidation_threshold);
-        health_factor = wad_div(wad_numerator, total_debt_in_base_currency);
+        wad_div(wad_numerator, total_debt_in_base_currency)
     } else {
-        health_factor = U256::MAX;
-    }
+        U256::MAX
+    };
 
     // Return values
     Ok((
@@ -804,6 +803,7 @@ pub fn calculate_bribe() -> U256 {
 /// This function also assumes trace_id will always be NOT none, as opposed to the one in bpchecker
 /// which passes none since it's only for compatibility purposes with the price cache integration
 /// in some of the helper functions.
+
 pub async fn get_best_liquidation_opportunity(
     user_reserve_data: Vec<UserReserveData>, // for borrowed_reserve and supplied_reserve
     reserves_data: Vec<AggregatedReserveData>,
