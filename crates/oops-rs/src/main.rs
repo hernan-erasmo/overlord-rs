@@ -1,19 +1,23 @@
 use alloy::{
-    hex, primitives::{Address, Bytes, U256}, providers::{IpcConnect, Provider, ProviderBuilder, RootProvider}, pubsub::{PubSubFrontend, Subscription}, rpc::{client::ClientBuilder, types::Transaction}, sol_types::SolCall
+    hex,
+    primitives::{Address, Bytes, U256},
+    providers::{IpcConnect, Provider, ProviderBuilder, RootProvider},
+    pubsub::{PubSubFrontend, Subscription},
+    rpc::{client::ClientBuilder, types::Transaction},
+    sol_types::SolCall,
 };
 use ethers_core::abi::{decode, ParamType};
-use mev_share_sse::{client::EventStream, Event as MevShareEvent, EventClient};
 use futures_util::StreamExt;
 use lru::LruCache;
+use mev_share_sse::{client::EventStream, Event as MevShareEvent, EventClient};
 use overlord_shared::{
     common::get_reserves_data,
     constants::GHO_PRICE_ORACLE,
     sol_bindings::{
-        AccessControlledOCR2Aggregator, AuthorizedForwarder, EACAggregatorProxy, IUiPoolDataProviderV3::AggregatedReserveData
+        AccessControlledOCR2Aggregator, AuthorizedForwarder, EACAggregatorProxy,
+        IUiPoolDataProviderV3::AggregatedReserveData,
     },
-    MessageBundle,
-    NewPrice,
-    PriceUpdateBundle
+    MessageBundle, NewPrice, PriceUpdateBundle,
 };
 
 use std::{
@@ -23,6 +27,7 @@ use std::{
     sync::Arc,
 };
 
+use futures::stream::FuturesUnordered;
 use tokio::{
     sync::broadcast,
     time::{sleep, Duration},
@@ -30,7 +35,6 @@ use tokio::{
 use tracing::{error, info, warn};
 use tracing_appender::rolling::{self, Rotation};
 use tracing_subscriber::fmt::{time::LocalTime, writer::BoxMakeWriter};
-use futures::stream::FuturesUnordered;
 
 mod sol_bindings;
 use sol_bindings::{forwardCall, transmitCall, transmitSecondaryCall, ForwardToDestination};
@@ -57,28 +61,38 @@ enum PendingTxType {
 }
 
 fn is_transmit_secondary(calldata: Option<Bytes>) -> bool {
-    calldata.as_ref().map_or(false, |data| data.windows(4).any(|w| w == [0xba, 0x0c, 0xb2, 0x9e]))
+    calldata.as_ref().map_or(false, |data| {
+        data.windows(4).any(|w| w == [0xba, 0x0c, 0xb2, 0x9e])
+    })
 }
 
 async fn get_tx_sender_from_contract(
     provider: RootProvider<PubSubFrontend>,
     forward_to_contract: Address,
 ) -> Result<Address, Box<dyn Error>> {
-    info!("Attempting to get transmitters from {:?}", forward_to_contract);
+    info!(
+        "Attempting to get transmitters from {:?}",
+        forward_to_contract
+    );
     let forward_contract = ForwardToDestination::new(forward_to_contract, provider.clone());
     let transmitters = match forward_contract.getTransmitters().call().await {
         Ok(transmitters) => transmitters._0,
-        Err(_) => {
-            match forward_contract.transmitters().call().await {
-                Ok(transmitters) => transmitters._0,
-                Err(e) => return Err(format!("Failed call to getTransmitters() AND transmitters(): {e}").into())
+        Err(_) => match forward_contract.transmitters().call().await {
+            Ok(transmitters) => transmitters._0,
+            Err(e) => {
+                return Err(
+                    format!("Failed call to getTransmitters() AND transmitters(): {e}").into(),
+                )
             }
-        }
+        },
     };
     if transmitters.is_empty() {
         return Err("No transmitters found".into());
     }
-    transmitters.first().cloned().ok_or_else(|| "No transmitters found".into())
+    transmitters
+        .first()
+        .cloned()
+        .ok_or_else(|| "No transmitters found".into())
 }
 
 /// Extract the new price from the input data of a transaction
@@ -133,12 +147,10 @@ fn get_price_from_input(tx_input: &Bytes) -> Result<NewPrice, Box<dyn Error>> {
     let median = &observations[observations.len() / 2];
     let answer = U256::from_str_radix(&median.to_string(), 16).unwrap();
 
-    Ok(
-        NewPrice {
-            price: answer,
-            chainlink_address: forward_calldata.to,
-        }
-    )
+    Ok(NewPrice {
+        price: answer,
+        chainlink_address: forward_calldata.to,
+    })
 }
 
 /// Check if the input data of a transaction is a call to the `transmit` function
@@ -205,7 +217,9 @@ async fn task_get_transmitters(
     // This can be anywhere from 1 to 3 or 4 RPC calls
     let addr = match resolve_aggregator(provider_clone.clone(), price_oracle).await {
         Ok(addr) => addr,
-        Err(e) => return Err(format!("resolve_aggregator() call failed for {}: {}", symbol, e).into())
+        Err(e) => {
+            return Err(format!("resolve_aggregator() call failed for {}: {}", symbol, e).into())
+        }
     };
 
     if addr == GHO_PRICE_ORACLE {
@@ -214,16 +228,33 @@ async fn task_get_transmitters(
 
     // Then get the actual aggregator from the proxy
     // 1 RPC call
-    let agg_address = match EACAggregatorProxy::new(addr, provider_clone.clone()).aggregator().call().await {
+    let agg_address = match EACAggregatorProxy::new(addr, provider_clone.clone())
+        .aggregator()
+        .call()
+        .await
+    {
         Ok(agg) => agg._0,
-        Err(e) => return Err(format!("Couldn't get aggregator() from address {} (price oracle: {}): {}",
-                                    addr, price_oracle, e).into())
+        Err(e) => {
+            return Err(format!(
+                "Couldn't get aggregator() from address {} (price oracle: {}): {}",
+                addr, price_oracle, e
+            )
+            .into())
+        }
     };
 
-    let transmitters = match AccessControlledOCR2Aggregator::new(agg_address, provider_clone).getTransmitters().call().await {
+    let transmitters = match AccessControlledOCR2Aggregator::new(agg_address, provider_clone)
+        .getTransmitters()
+        .call()
+        .await
+    {
         Ok(response) => response._0,
         Err(e) => {
-            return Err(format!("Couldn't get transmitters from aggregator {}: {}", agg_address, e).into())
+            return Err(format!(
+                "Couldn't get transmitters from aggregator {}: {}",
+                agg_address, e
+            )
+            .into())
         }
     };
 
@@ -234,12 +265,23 @@ async fn task_get_transmitters(
 /// Get authorized senders from a transmitter address
 async fn task_get_authorized_senders(
     provider: Arc<RootProvider<PubSubFrontend>>,
-    transmitter: Address
+    transmitter: Address,
 ) -> Result<Vec<Address>, Box<dyn Error + Send + Sync>> {
-    info!("Getting authorized senders from transmitter {:?}", transmitter);
-    match AuthorizedForwarder::new(transmitter, provider).getAuthorizedSenders().call().await {
+    info!(
+        "Getting authorized senders from transmitter {:?}",
+        transmitter
+    );
+    match AuthorizedForwarder::new(transmitter, provider)
+        .getAuthorizedSenders()
+        .call()
+        .await
+    {
         Ok(result) => Ok(result._0),
-        Err(e) => Err(format!("Failed to get authorized senders from transmitter {:?}: {}", transmitter, e).into())
+        Err(e) => Err(format!(
+            "Failed to get authorized senders from transmitter {:?}: {}",
+            transmitter, e
+        )
+        .into()),
     }
 }
 
@@ -258,7 +300,13 @@ async fn collect_transmitters(
     // one RPC call
     let reserves = match get_reserves_data(provider.clone()).await {
         Ok(response) => response,
-        Err(e) => return Err(format!("Error fetching reserves data in collect_transmitters(): {}", e).into())
+        Err(e) => {
+            return Err(format!(
+                "Error fetching reserves data in collect_transmitters(): {}",
+                e
+            )
+            .into())
+        }
     };
 
     // Create a HashMap that maps price oracles to their respective reserve data
@@ -278,11 +326,7 @@ async fn collect_transmitters(
         let symbol = reserve.symbol.clone();
 
         // Spawn each task into the FuturesUnordered collection
-        aggregator_tasks.push(task_get_transmitters(
-            provider_clone,
-            price_oracle,
-            symbol,
-        ));
+        aggregator_tasks.push(task_get_transmitters(provider_clone, price_oracle, symbol));
     }
 
     // Track unique transmitters to avoid duplicate calls
@@ -301,25 +345,31 @@ async fn collect_transmitters(
                         let provider_clone = provider.clone();
                         sender_tasks.push(task_get_authorized_senders(provider_clone, transmitter));
                     } else {
-                        info!("Authorized senders for transmitter {} already accounted for", transmitter);
+                        info!(
+                            "Authorized senders for transmitter {} already accounted for",
+                            transmitter
+                        );
                     }
                 }
-            },
+            }
             Ok(None) => {
                 // This was a GHO_PRICE_ORACLE, skip it
                 continue;
-            },
-            Err(e) => return Err(e)
+            }
+            Err(e) => return Err(e),
         }
     }
 
     // Process all the sender tasks
-    info!("Processing {} unique transmitters to get authorized senders", sender_tasks.len());
+    info!(
+        "Processing {} unique transmitters to get authorized senders",
+        sender_tasks.len()
+    );
     while let Some(result) = sender_tasks.next().await {
         match result {
             Ok(senders) => {
                 collected_authorized_forwarders.extend(senders);
-            },
+            }
             Err(e) => {
                 // Log error but continue with other transmitters
                 error!("Error getting authorized senders: {}", e);
@@ -398,7 +448,7 @@ async fn create_subscription_stream(
 ) -> Result<Subscription<Transaction>, Box<dyn Error>> {
     let stream = match provider.subscribe_full_pending_transactions().await {
         Ok(stream) => stream,
-        Err(e) => return Err(Box::new(e))
+        Err(e) => return Err(Box::new(e)),
     };
     Ok(stream)
 }
@@ -418,8 +468,12 @@ async fn create_mev_share_stream() -> Result<EventStream<mev_share_sse::Event>, 
 async fn main() {
     _setup_logging();
 
-    let new_price_cache: LruCache<NewPrice, ()> = LruCache::new(NonZeroUsize::new(OOPS_PRICE_CACHE_SIZE).unwrap());
-    info!("Price cache initialized with size: {}", OOPS_PRICE_CACHE_SIZE);
+    let new_price_cache: LruCache<NewPrice, ()> =
+        LruCache::new(NonZeroUsize::new(OOPS_PRICE_CACHE_SIZE).unwrap());
+    info!(
+        "Price cache initialized with size: {}",
+        OOPS_PRICE_CACHE_SIZE
+    );
 
     let provider = match create_provider().await {
         Ok(provider) => provider,
@@ -436,7 +490,10 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    info!("Transmitters we would listen to for price updates: {:?}", transmitters);
+    info!(
+        "Transmitters we would listen to for price updates: {:?}",
+        transmitters
+    );
 
     loop {
         let provider = provider.clone();
@@ -472,7 +529,9 @@ async fn main() {
             loop {
                 match mempool_tx_stream.recv().await {
                     Ok(tx_body) => {
-                        if let Err(e) = tx_buffer_for_mempool.send(PendingTxType::FromMempool(tx_body)) {
+                        if let Err(e) =
+                            tx_buffer_for_mempool.send(PendingTxType::FromMempool(tx_body))
+                        {
                             error!("Failed to send tx to buffer from mempool receiver: {e}");
                             break;
                         }
@@ -492,7 +551,9 @@ async fn main() {
                         if event.transactions.is_empty() {
                             continue;
                         };
-                        if let Err(e) = tx_buffer_for_mev_share.send(PendingTxType::FromMevShare(event)) {
+                        if let Err(e) =
+                            tx_buffer_for_mev_share.send(PendingTxType::FromMevShare(event))
+                        {
                             error!("Failed to send tx to buffer from mev-share receiver: {e}");
                             break;
                         };
@@ -565,7 +626,10 @@ async fn main() {
                                     u64::MIN
                                 }
                             };
-                            let raw_tx = match provider_clone.get_raw_transaction_by_hash(tx_hash).await {
+                            let raw_tx = match provider_clone
+                                .get_raw_transaction_by_hash(tx_hash)
+                                .await
+                            {
                                 Ok(raw_tx) => raw_tx,
                                 Err(e) => {
                                     error!("Failed to get mempool raw transaction by hash: {e}");
@@ -579,7 +643,9 @@ async fn main() {
                                 trace_id: format!("{:?}", &tx_hash)[2..10].to_string(),
                                 tx_new_price: new_price.price,
                                 forward_to: new_price.chainlink_address,
-                                tx_to: tx_body.to.expect("This mempool tx didn't define a TO address"),
+                                tx_to: tx_body
+                                    .to
+                                    .expect("This mempool tx didn't define a TO address"),
                                 tx_from,
                                 tx_input: tx_body.input,
                             };
@@ -618,7 +684,11 @@ async fn main() {
                                     // MevShare tx doesn't define function selector. Nothing to do.
                                     continue;
                                 }
-                                if tx.function_selector.as_ref().map_or(true, |selector| selector != &[0x6f, 0xad, 0xcf, 0x72]) {
+                                if tx
+                                    .function_selector
+                                    .as_ref()
+                                    .map_or(true, |selector| selector != &[0x6f, 0xad, 0xcf, 0x72])
+                                {
                                     // Mevshare event function selector doesn't match forward()
                                     continue;
                                 }
@@ -628,7 +698,9 @@ async fn main() {
                                 }
                                 let tx_calldata = tx.calldata.clone();
                                 if is_transmit_secondary(tx.calldata.clone()) {
-                                    let new_price = match get_price_from_input(&tx.calldata.unwrap()) {
+                                    let new_price = match get_price_from_input(
+                                        &tx.calldata.unwrap(),
+                                    ) {
                                         Ok(new_price) => new_price,
                                         Err(e) => {
                                             error!("INVALID PRICE UPDATE for mev-share: failed to get price from input: {e}");
@@ -647,23 +719,31 @@ async fn main() {
                                     } else {
                                         new_price_cache.put(new_price.clone(), ());
                                     };
-                                    let tx_from = match get_tx_sender_from_contract(provider.clone(), new_price.chainlink_address).await {
+                                    let tx_from = match get_tx_sender_from_contract(
+                                        provider.clone(),
+                                        new_price.chainlink_address,
+                                    )
+                                    .await
+                                    {
                                         Ok(from) => from,
                                         Err(e) => {
-                                            error!("Failed to get mevshare tx_from from contract: {e}");
+                                            error!(
+                                                "Failed to get mevshare tx_from from contract: {e}"
+                                            );
                                             continue;
                                         }
                                     };
-                                    let expected_block = match provider_clone.get_block_number().await {
-                                        // When reading the block, the provider is going to return the last submitted block
-                                        // that it's aware of, meaning that a pending tx is expected to land on block + 1
-                                        // at the earliest
-                                        Ok(block) => block + 1,
-                                        Err(e) => {
-                                            warn!("Failed to get block number: {e}");
-                                            u64::MIN
-                                        }
-                                    };
+                                    let expected_block =
+                                        match provider_clone.get_block_number().await {
+                                            // When reading the block, the provider is going to return the last submitted block
+                                            // that it's aware of, meaning that a pending tx is expected to land on block + 1
+                                            // at the earliest
+                                            Ok(block) => block + 1,
+                                            Err(e) => {
+                                                warn!("Failed to get block number: {e}");
+                                                u64::MIN
+                                            }
+                                        };
                                     let bundle = PriceUpdateBundle {
                                         tx_hash: format!("{:?}", event.hash).to_string(),
                                         raw_tx: None, // I believe that we can pass the hash if it's a mevshare update
@@ -676,13 +756,14 @@ async fn main() {
                                         tx_input: tx_calldata.unwrap(),
                                     };
                                     let message_bundle = MessageBundle::PriceUpdate(bundle.clone());
-                                    let serialized_bundle = match bincode::serialize(&message_bundle) {
-                                        Ok(bundle) => bundle,
-                                        Err(e) => {
-                                            error!("Failed to serialize message bundle: {e}");
-                                            continue;
-                                        }
-                                    };
+                                    let serialized_bundle =
+                                        match bincode::serialize(&message_bundle) {
+                                            Ok(bundle) => bundle,
+                                            Err(e) => {
+                                                error!("Failed to serialize message bundle: {e}");
+                                                continue;
+                                            }
+                                        };
                                     match vega_socket.send(&serialized_bundle, 0) {
                                         Ok(_) => (),
                                         Err(e) => {

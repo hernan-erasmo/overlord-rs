@@ -5,27 +5,15 @@ use alloy::{
 };
 use overlord_shared::{
     constants::{
-        AAVE_ORACLE_ADDRESS,
-        AAVE_V3_POOL_ADDRESS,
-        AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS,
-        MORPHO,
-        UNISWAP_V3_FACTORY,
-        WETH,
+        AAVE_ORACLE_ADDRESS, AAVE_V3_POOL_ADDRESS, AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS, MORPHO,
+        UNISWAP_V3_FACTORY, WETH,
     },
     sol_bindings::{
-        AaveOracle,
-        IUiPoolDataProviderV3::{
-            AggregatedReserveData,
-            UserReserveData
-        },
-        IAToken,
-        ERC20,
         pool::AaveV3Pool,
-        AaveProtocolDataProvider,
-        UniswapV3Pool,
-        UniswapV3Factory,
-        Foxdie,
-    }
+        AaveOracle, AaveProtocolDataProvider, Foxdie, IAToken,
+        IUiPoolDataProviderV3::{AggregatedReserveData, UserReserveData},
+        UniswapV3Factory, UniswapV3Pool, ERC20,
+    },
 };
 use std::sync::Arc;
 
@@ -72,7 +60,7 @@ pub async fn get_best_liquidity_provider(
             reasons.push(error_msg);
             return LiquiditySolution {
                 source: Foxdie::FlashLoanSource::NONE,
-                reasons
+                reasons,
             };
         }
     };
@@ -81,22 +69,33 @@ pub async fn get_best_liquidity_provider(
     if morpho_balance >= actual_debt_to_liquidate {
         return LiquiditySolution {
             source: Foxdie::FlashLoanSource::MORPHO,
-            reasons
+            reasons,
         };
     } else {
-        reasons.push(format!("MORPHO balance for {} ({}) is not enough", debt_asset, morpho_balance));
+        reasons.push(format!(
+            "MORPHO balance for {} ({}) is not enough",
+            debt_asset, morpho_balance
+        ));
     }
 
-    let pool_data_provider = AaveProtocolDataProvider::new(AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS, provider.clone());
-    let is_flashloan_enabled = match pool_data_provider.getFlashLoanEnabled(debt_asset).call().await {
+    let pool_data_provider =
+        AaveProtocolDataProvider::new(AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS, provider.clone());
+    let is_flashloan_enabled = match pool_data_provider
+        .getFlashLoanEnabled(debt_asset)
+        .call()
+        .await
+    {
         Ok(res) => res._0,
         Err(e) => {
-            let error_msg = format!("Error trying to determine if AAVE flashloan is enabled for {}: {}", debt_asset, e);
+            let error_msg = format!(
+                "Error trying to determine if AAVE flashloan is enabled for {}: {}",
+                debt_asset, e
+            );
             warn!("{}", error_msg.clone());
             reasons.push(error_msg);
             return LiquiditySolution {
                 source: Foxdie::FlashLoanSource::NONE,
-                reasons
+                reasons,
             };
         }
     };
@@ -105,25 +104,28 @@ pub async fn get_best_liquidity_provider(
         reasons.push(format!("AAVE flashLoan is not enabled for {}", debt_asset));
         return LiquiditySolution {
             source: Foxdie::FlashLoanSource::NONE,
-            reasons
+            reasons,
         };
     };
 
     // The process to query AAVE v3 balances is a little more indirect. First we need to get the
     // AToken contract address corresponding to the underlying we want to borrow:
     let a_token_debt_address = match AaveV3Pool::new(AAVE_V3_POOL_ADDRESS, provider.clone())
-        .getReserveData(debt_asset).call().await {
-            Ok(reserve_data) => reserve_data._0.aTokenAddress,
-            Err(e) => {
-                let error_msg = format!("Couldn't get reserve data for calculating best flash loan provider for debt {}: {}", debt_asset, e);
-                warn!("{}", error_msg.clone());
-                reasons.push(error_msg);
-                return LiquiditySolution {
-                    source: Foxdie::FlashLoanSource::NONE,
-                    reasons
-                };
-            }
-        };
+        .getReserveData(debt_asset)
+        .call()
+        .await
+    {
+        Ok(reserve_data) => reserve_data._0.aTokenAddress,
+        Err(e) => {
+            let error_msg = format!("Couldn't get reserve data for calculating best flash loan provider for debt {}: {}", debt_asset, e);
+            warn!("{}", error_msg.clone());
+            reasons.push(error_msg);
+            return LiquiditySolution {
+                source: Foxdie::FlashLoanSource::NONE,
+                reasons,
+            };
+        }
+    };
 
     // Now we query the asset's balanceOf of the AToken contract
     let aave_balance = match ERC20::new(debt_asset, provider.clone())
@@ -138,7 +140,7 @@ pub async fn get_best_liquidity_provider(
             reasons.push(error_msg);
             return LiquiditySolution {
                 source: Foxdie::FlashLoanSource::NONE,
-                reasons
+                reasons,
             };
         }
     };
@@ -146,15 +148,18 @@ pub async fn get_best_liquidity_provider(
     if aave_balance >= actual_debt_to_liquidate {
         return LiquiditySolution {
             source: Foxdie::FlashLoanSource::AAVE_V3,
-            reasons
+            reasons,
         };
     } else {
-        reasons.push(format!("AAVE V3 balance for {} ({}) is not enough", debt_asset, aave_balance));
+        reasons.push(format!(
+            "AAVE V3 balance for {} ({}) is not enough",
+            debt_asset, aave_balance
+        ));
     }
 
     LiquiditySolution {
         source: Foxdie::FlashLoanSource::NONE,
-        reasons
+        reasons,
     }
 }
 
@@ -220,36 +225,45 @@ pub async fn calculate_user_balances(
     borrowed_reserve: &UserReserveData,
     provider: Arc<RootProvider<PubSubFrontend>>,
     user_address: Address,
-) -> Result<(AggregatedReserveData, U256, AggregatedReserveData, U256), Box<dyn std::error::Error>> {
+) -> Result<(AggregatedReserveData, U256, AggregatedReserveData, U256), Box<dyn std::error::Error>>
+{
     let collateral_reserve = reserves_data
         .iter()
         .find(|agg_reserve_data| {
             agg_reserve_data.underlyingAsset == supplied_reserve.underlyingAsset
         })
         .unwrap();
-    let collateral_a_token =
-        IAToken::new(collateral_reserve.aTokenAddress, provider.clone());
-    let user_collateral_balance =
-        match collateral_a_token.balanceOf(user_address).call().await {
-            Ok(response) => response._0,
-            Err(e) => return Err(format!("Error trying to call collateralAToken.balanceOf(): {}", e).into())
-        };
+    let collateral_a_token = IAToken::new(collateral_reserve.aTokenAddress, provider.clone());
+    let user_collateral_balance = match collateral_a_token.balanceOf(user_address).call().await {
+        Ok(response) => response._0,
+        Err(e) => {
+            return Err(format!("Error trying to call collateralAToken.balanceOf(): {}", e).into())
+        }
+    };
     let debt_reserve = reserves_data
         .iter()
         .find(|agg_reserve_data| {
             agg_reserve_data.underlyingAsset == borrowed_reserve.underlyingAsset
         })
         .unwrap();
-    let debt_reserve_token =
-        ERC20::new(debt_reserve.variableDebtTokenAddress, provider.clone());
+    let debt_reserve_token = ERC20::new(debt_reserve.variableDebtTokenAddress, provider.clone());
     let user_reserve_debt = match debt_reserve_token.balanceOf(user_address).call().await {
         Ok(response) => response.balance,
-        Err(e) => return Err(format!("Error trying to call debt_reserve_token.balanceOf: {}", e).into())
+        Err(e) => {
+            return Err(format!("Error trying to call debt_reserve_token.balanceOf: {}", e).into())
+        }
     };
-    Ok((collateral_reserve.clone(), user_collateral_balance, debt_reserve.clone(), user_reserve_debt))
+    Ok((
+        collateral_reserve.clone(),
+        user_collateral_balance,
+        debt_reserve.clone(),
+        user_reserve_debt,
+    ))
 }
 
-pub async fn get_reserves_list(provider: Arc<RootProvider<PubSubFrontend>>) -> Result<Vec<Address>, Box<dyn std::error::Error>> {
+pub async fn get_reserves_list(
+    provider: Arc<RootProvider<PubSubFrontend>>,
+) -> Result<Vec<Address>, Box<dyn std::error::Error>> {
     /*
        According to https://github.com/aave-dao/aave-v3-origin/blob/a0512f8354e97844a3ed819cf4a9a663115b8e20/src/contracts/protocol/pool/Pool.sol#L532
        the reserves list is ordered the same way as the _reserveList storage in the Pool contract.
@@ -260,7 +274,7 @@ pub async fn get_reserves_list(provider: Arc<RootProvider<PubSubFrontend>>) -> R
         .await
     {
         Ok(reserves_list) => Ok(reserves_list._0),
-        Err(e) => Err(format!("Error trying to call getReservesList: {}", e).into())
+        Err(e) => Err(format!("Error trying to call getReservesList: {}", e).into()),
     }
 }
 
@@ -426,9 +440,7 @@ pub async fn calculate_user_account_data(
         .await
     {
         Ok(user_config) => user_config._0,
-        Err(e) => {
-            return Err(format!("Error trying to call getUserConfiguration: {}", e).into())
-        }
+        Err(e) => return Err(format!("Error trying to call getUserConfiguration: {}", e).into()),
     };
 
     // Operate
@@ -446,10 +458,21 @@ pub async fn calculate_user_account_data(
         let liquidation_threshold = reserves_data[i].reserveLiquidationThreshold;
         let decimals = reserves_data[i].decimals;
         let asset_unit = U256::from(10).pow(U256::from(decimals));
-        let asset_price = match price_cache.lock().await.get_price(reserve_address, trace_id.clone(), AaveOracle::new(AAVE_ORACLE_ADDRESS, provider.clone())).await {
+        let asset_price = match price_cache
+            .lock()
+            .await
+            .get_price(
+                reserve_address,
+                trace_id.clone(),
+                AaveOracle::new(AAVE_ORACLE_ADDRESS, provider.clone()),
+            )
+            .await
+        {
             Ok(price) => price,
             Err(e) => {
-                return Err(format!("Error trying to get price for {}: {}", reserve_address, e).into())
+                return Err(
+                    format!("Error trying to get price for {}: {}", reserve_address, e).into(),
+                )
             }
         };
 
@@ -504,7 +527,11 @@ pub async fn calculate_user_account_data(
                     {
                         Ok(balance_of_response) => balance_of_response.balance,
                         Err(e) => {
-                            return Err(format!("Error trying to call balanceOf for {}: {}", user_address, e).into())
+                            return Err(format!(
+                                "Error trying to call balanceOf for {}: {}",
+                                user_address, e
+                            )
+                            .into())
                         }
                     } * asset_price
                         / asset_unit;
@@ -528,11 +555,11 @@ pub async fn calculate_user_account_data(
     }
 
     // Return values
-    Ok(
-        ( total_collateral_in_base_currency,
+    Ok((
+        total_collateral_in_base_currency,
         total_debt_in_base_currency,
-        health_factor)
-    )
+        health_factor,
+    ))
 }
 
 /// Returns pools, fees and liquidity sorted by liquidity descending
@@ -638,7 +665,11 @@ pub async fn estimate_gas(provider: Arc<RootProvider<PubSubFrontend>>) -> (U256,
         Ok(price) => U256::from(price) / U256::from(1e3),
         _ => U256::MAX,
     };
-    return (default_gas_used, gas_price_in_gwei, default_gas_used * gas_price_in_gwei / U256::from(1000000))
+    return (
+        default_gas_used,
+        gas_price_in_gwei,
+        default_gas_used * gas_price_in_gwei / U256::from(1000000),
+    );
     /*
     match Foxdie::new(FOXDIE_ADDRESS, provider.clone())
         .triggerLiquidation(Foxdie::LiquidationParams {
@@ -668,7 +699,7 @@ pub async fn estimate_gas(provider: Arc<RootProvider<PubSubFrontend>>) -> (U256,
 /// in bpchecker, with the only difference being the removal of print statements
 /// and different error handling. Logic MUST BE THE SAME. The problem is that
 /// I don't have time to refactor those out now.
-/// 
+///
 /// In the future, if you have time, try to figure out a way of adding a debug
 /// mode, or something like that, so that the print statements are only executed
 /// when called from bpchecker, and then you'll be able to remove this duplicate logic
@@ -695,7 +726,9 @@ async fn calculate_available_collateral_to_liquidate(
         .await
     {
         Ok(response) => response._0,
-        Err(e) => return Err(format!("Error trying to call collateralAToken.balanceOf(): {}", e).into())
+        Err(e) => {
+            return Err(format!("Error trying to call collateralAToken.balanceOf(): {}", e).into())
+        }
     };
     let base_collateral = (debt_asset_price * debt_to_cover * collateral_asset_unit)
         / (collateral_asset_price * debt_asset_unit);
@@ -705,7 +738,11 @@ async fn calculate_available_collateral_to_liquidate(
     let debt_amount_needed;
     if max_collateral_to_liquidate > user_collateral_balance {
         collateral_amount = user_collateral_balance;
-        debt_amount_needed = percent_div((collateral_asset_price * collateral_amount * debt_asset_unit) / (debt_asset_price * collateral_asset_unit), liquidation_bonus);
+        debt_amount_needed = percent_div(
+            (collateral_asset_price * collateral_amount * debt_asset_unit)
+                / (debt_asset_price * collateral_asset_unit),
+            liquidation_bonus,
+        );
     } else {
         collateral_amount = max_collateral_to_liquidate;
         debt_amount_needed = debt_to_cover;
@@ -788,32 +825,48 @@ pub async fn get_best_liquidation_opportunity(
             .filter(|r| r.usageAsCollateralEnabledOnUser && r.scaledATokenBalance > U256::ZERO)
         {
             // begin section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L234-L238
-            let (
-                collateral_reserve,
-                user_collateral_balance,
-                debt_reserve,
-                user_reserve_debt
-            ) = match calculate_user_balances(
-                reserves_data.clone(),
-                supplied_reserve,
-                borrowed_reserve,
-                provider.clone(),
-                user_address,
-            ).await {
-                Ok(result) => result,
-                Err(e) => {
-                    warn!("Error calculating user balances: {}", e);
-                    continue;
-                }
-            };
+            let (collateral_reserve, user_collateral_balance, debt_reserve, user_reserve_debt) =
+                match calculate_user_balances(
+                    reserves_data.clone(),
+                    supplied_reserve,
+                    borrowed_reserve,
+                    provider.clone(),
+                    user_address,
+                )
+                .await
+                {
+                    Ok(result) => result,
+                    Err(e) => {
+                        warn!("Error calculating user balances: {}", e);
+                        continue;
+                    }
+                };
             // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L234-L238
 
             // begin section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L252-L276
             // TODO(Hernan): you should at least visually check if liquidationBonus is returning what you're expecting, since
             // the solidity implementation uses bit masking to get the value.
             let liquidation_bonus = collateral_reserve.reserveLiquidationBonus;
-            let collateral_asset_price = price_cache.lock().await.get_price(supplied_reserve.underlyingAsset, Some(trace_id.clone()), oracle.clone()).await.unwrap();
-            let debt_asset_price = price_cache.lock().await.get_price(borrowed_reserve.underlyingAsset, Some(trace_id.clone()), oracle.clone()).await.unwrap();
+            let collateral_asset_price = price_cache
+                .lock()
+                .await
+                .get_price(
+                    supplied_reserve.underlyingAsset,
+                    Some(trace_id.clone()),
+                    oracle.clone(),
+                )
+                .await
+                .unwrap();
+            let debt_asset_price = price_cache
+                .lock()
+                .await
+                .get_price(
+                    borrowed_reserve.underlyingAsset,
+                    Some(trace_id.clone()),
+                    oracle.clone(),
+                )
+                .await
+                .unwrap();
             let collateral_asset_unit = U256::from(10).pow(collateral_reserve.decimals);
             let debt_asset_unit = U256::from(10).pow(debt_reserve.decimals);
             let user_reserve_debt_in_base_currency =
@@ -854,7 +907,8 @@ pub async fn get_best_liquidation_opportunity(
                 user_collateral_balance,
                 liquidation_bonus,
             )
-            .await {
+            .await
+            {
                 Ok(result) => result,
                 Err(e) => {
                     warn!("Error calculating available collateral to liquidate: {}", e);
@@ -867,15 +921,14 @@ pub async fn get_best_liquidation_opportunity(
             // TODO(Hernan): do we need to make sure this doesn't bite us in the ass?
             // end section https://github.com/aave-dao/aave-v3-origin/blob/e8f6699e58038cbe3aba982557ceb2b0dda303a0/src/contracts/protocol/libraries/logic/LiquidationLogic.sol#L320-L344
 
-            let printable_net_profit = format_units(
-                net_profit,
-                8
-            ).unwrap_or_else(|_| "CONVERSION_ERROR".to_string());
+            let printable_net_profit =
+                format_units(net_profit, 8).unwrap_or_else(|_| "CONVERSION_ERROR".to_string());
             let best_liquidity_provider = get_best_liquidity_provider(
                 provider.clone(),
                 debt_reserve.underlyingAsset,
-                actual_debt_to_liquidate
-            ).await;
+                actual_debt_to_liquidate,
+            )
+            .await;
             if net_profit > best_pair.as_ref().map_or(U256::ZERO, |p| p.net_profit)
                 && best_liquidity_provider.source != Foxdie::FlashLoanSource::NONE
             {

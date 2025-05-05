@@ -6,19 +6,15 @@ use alloy::{
 use overlord_shared::{
     common::get_reserves_data,
     sol_bindings::{
-        AaveOracle,
-        AaveUIPoolDataProvider,
-        GetReserveConfigurationDataReturn,
-        pool::AaveV3Pool,
-        AaveProtocolDataProvider,
-        IERC20Metadata,
-        IUiPoolDataProviderV3::AggregatedReserveData,
-        ERC20,
+        pool::AaveV3Pool, AaveOracle, AaveProtocolDataProvider, AaveUIPoolDataProvider,
+        GetReserveConfigurationDataReturn, IERC20Metadata,
+        IUiPoolDataProviderV3::AggregatedReserveData, ERC20,
     },
 };
 use std::{collections::HashMap, f64, sync::Arc};
 
-pub const AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS: Address = address!("3f78bbd206e4d3c504eb854232eda7e47e9fd8fc");
+pub const AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS: Address =
+    address!("3f78bbd206e4d3c504eb854232eda7e47e9fd8fc");
 const AAVE_V3_PROVIDER_ADDRESS: Address = address!("2f39d218133afab8f2b819b1066c7e434ad94e9e");
 pub const AAVE_ORACLE_ADDRESS: Address = address!("0x54586bE62E3c3580375aE3723C145253060Ca0C2");
 
@@ -38,13 +34,14 @@ pub struct ReserveConfigurationEnhancedData {
 pub type ReserveConfigurationData = HashMap<Address, ReserveConfigurationEnhancedData>;
 
 /// Get the symbol of a token, or return a default string in case of failure
-async fn get_token_symbol(provider: Arc<RootProvider<PubSubFrontend>>, token_address: Address) -> String {
+async fn get_token_symbol(
+    provider: Arc<RootProvider<PubSubFrontend>>,
+    token_address: Address,
+) -> String {
     let token = IERC20Metadata::new(token_address, provider.clone());
     match token.symbol().call().await {
         Ok(symbol) => symbol._0,
-        Err(_) => {
-            "UNK_OR_UNDEF_SYMBOL".to_string()
-        }
+        Err(_) => "UNK_OR_UNDEF_SYMBOL".to_string(),
     }
 }
 
@@ -60,15 +57,17 @@ pub async fn generate_reserve_details_by_asset(
     {
         Ok(reserves) => reserves._0,
         Err(e) => {
-            return Err(format!("Failed to get reserves list to initialize reserve configuration struct: {}", e).into());
+            return Err(format!(
+                "Failed to get reserves list to initialize reserve configuration struct: {}",
+                e
+            )
+            .into());
         }
     };
     let mut configuration_data: ReserveConfigurationData = HashMap::new();
 
-    let aave_config = AaveProtocolDataProvider::new(
-        AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS,
-        provider.clone(),
-    );
+    let aave_config =
+        AaveProtocolDataProvider::new(AAVE_V3_PROTOCOL_DATA_PROVIDER_ADDRESS, provider.clone());
     for reserve_address in reserve_addresses {
         let symbol = get_token_symbol(provider.clone(), reserve_address).await;
         let data = match aave_config
@@ -90,9 +89,7 @@ pub async fn generate_reserve_details_by_asset(
             .call()
             .await
         {
-            Ok(fee_response) => {
-                fee_response._0
-            }
+            Ok(fee_response) => fee_response._0,
             Err(e) => {
                 return Err(format!(
                     "Failed to get reserve liquidation fee for asset {}: {}",
@@ -150,12 +147,7 @@ pub async fn has_any_collateral_above_threshold(
     let reserves_data = get_reserves_data(provider.clone()).await?;
     let reserves_data = reserves_data
         .into_iter()
-        .map(|d| {
-            (
-                d.underlyingAsset,
-                d,
-            )
-        })
+        .map(|d| (d.underlyingAsset, d))
         .collect::<HashMap<_, _>>();
 
     let collateral_positions = user_positions
@@ -168,7 +160,10 @@ pub async fn has_any_collateral_above_threshold(
     }
     for position in collateral_positions {
         // get the aToken balance for the underlying asset
-        let a_token = reserves_data.get(&position.underlying_asset).unwrap().aTokenAddress;
+        let a_token = reserves_data
+            .get(&position.underlying_asset)
+            .unwrap()
+            .aTokenAddress;
         let a_token_contract = ERC20::new(a_token, provider.clone());
         let a_token_balance = match a_token_contract.balanceOf(user_address).call().await {
             Ok(balance) => balance.balance,
@@ -193,17 +188,21 @@ pub async fn has_any_collateral_above_threshold(
             .unwrap()
             .decimals;
 
-        let symbol = reserves_data.get(&position.underlying_asset).unwrap().symbol.clone();
+        let symbol = reserves_data
+            .get(&position.underlying_asset)
+            .unwrap()
+            .symbol
+            .clone();
         println!("Profit potential for {}:", symbol);
 
-        let a_token_balance_in_asset_units = f64::from(a_token_balance) / f64::from(10).powi(decimals.try_into().unwrap_or(0));
+        let a_token_balance_in_asset_units =
+            f64::from(a_token_balance) / f64::from(10).powi(decimals.try_into().unwrap_or(0));
         let raw = a_token_balance.as_limbs()[0] as f64; // Get the lowest limb which is u64, then convert to f64
-        let token_units = raw / 10f64.powi(decimals.try_into().unwrap_or(0));       // normalize the token amount
-        let a_token_balance_in_usd = token_units * (price.to::<u128>() as f64 / 1e8);     // multiply by price, normalize 8 decimals
-        println!("\taToken balance = {}, in asset units = {}, in USD = ${}",
-            a_token_balance,
-            a_token_balance_in_asset_units,
-            a_token_balance_in_usd,
+        let token_units = raw / 10f64.powi(decimals.try_into().unwrap_or(0)); // normalize the token amount
+        let a_token_balance_in_usd = token_units * (price.to::<u128>() as f64 / 1e8); // multiply by price, normalize 8 decimals
+        println!(
+            "\taToken balance = {}, in asset units = {}, in USD = ${}",
+            a_token_balance, a_token_balance_in_asset_units, a_token_balance_in_usd,
         );
 
         // In normal operation, AAVE applies the liquidation bonus on top of the max available collateral to liquidate
@@ -211,16 +210,15 @@ pub async fn has_any_collateral_above_threshold(
         // threshold, then it won't be above the profit threshold with max collateral to liquidate either, and thus discard the user
         let bonus_fraction = (f64::from(liquidation_bonus) - 10000.0) / 100.0;
         let bonus_in_usd = a_token_balance_in_usd * f64::from(bonus_fraction) / 100.0;
-        println!("\tLiquidation bonus in USD ({}% of ${}) = ${}",
-            bonus_fraction,
-            a_token_balance_in_usd,
-            bonus_in_usd,
+        println!(
+            "\tLiquidation bonus in USD ({}% of ${}) = ${}",
+            bonus_fraction, a_token_balance_in_usd, bonus_in_usd,
         );
 
         if bonus_in_usd >= min_collateral_in_usd {
-            return Ok(true)
+            return Ok(true);
         };
-    };
+    }
     Ok(false)
 }
 
@@ -233,10 +231,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let provider = ProviderBuilder::new().on_ipc(ipc).await?;
     let provider = Arc::new(provider);
 
-    println!("Calculating collateral threshold for address: {}", user_address);
-    
+    println!(
+        "Calculating collateral threshold for address: {}",
+        user_address
+    );
+
     let mut user_positions: Vec<UserPosition> = vec![];
-    let ui_data = AaveUIPoolDataProvider::new(AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, provider.clone());
+    let ui_data =
+        AaveUIPoolDataProvider::new(AAVE_V3_UI_POOL_DATA_PROVIDER_ADDRESS, provider.clone());
     let result = ui_data
         .getUserReservesData(AAVE_V3_PROVIDER_ADDRESS, user_address)
         .call()
@@ -261,9 +263,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let min_collateral_in_usd = 1.5 as f64;
-    let verdict = match has_any_collateral_above_threshold(provider, user_address, user_positions, min_collateral_in_usd).await {
+    let verdict = match has_any_collateral_above_threshold(
+        provider,
+        user_address,
+        user_positions,
+        min_collateral_in_usd,
+    )
+    .await
+    {
         Ok(res) => res,
-        Err(e) => return Err(format!("Error calculating has_any_collateral_above_threshold: {}", e).into())
+        Err(e) => {
+            return Err(format!(
+                "Error calculating has_any_collateral_above_threshold: {}",
+                e
+            )
+            .into())
+        }
     };
     if verdict {
         println!("The user should've been included in the cache");

@@ -5,16 +5,16 @@ mod utils;
 
 use alloy::{providers::RootProvider, pubsub::PubSubFrontend};
 use cache::{PriceCache, ProviderCache};
-use calculations::{get_best_liquidation_opportunity, get_reserves_list, calculate_user_account_data, calculate_best_swap_fees, calculate_bribe};
+use calculations::{
+    calculate_best_swap_fees, calculate_bribe, calculate_user_account_data,
+    get_best_liquidation_opportunity, get_reserves_list,
+};
 use mev_share_service::MevShareService;
 use overlord_shared::{
-    constants::{
-        AAVE_ORACLE_ADDRESS,
-        PROFITO_INBOUND_ENDPOINT,
-    },
     common::get_reserves_data,
+    constants::{AAVE_ORACLE_ADDRESS, PROFITO_INBOUND_ENDPOINT},
     sol_bindings::AaveOracle,
-    UnderwaterUserEvent
+    UnderwaterUserEvent,
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -62,30 +62,25 @@ async fn process_uw_event(
 
     let reserves_list = match get_reserves_list(provider.clone()).await {
         Ok(reserves_list) => reserves_list,
-        Err(e) => {
-            return Err(e)
-        }
+        Err(e) => return Err(e),
     };
 
     let reserves_data = match get_reserves_data(provider.clone()).await {
         Ok(reserves_data) => reserves_data,
-        Err(e) => {
-            return Err(e)
-        }
+        Err(e) => return Err(e),
     };
 
-    let (
-        _total_collateral_in_base_currency,
-        total_debt_in_base_currency,
-        health_factor_v33
-    ) = match calculate_user_account_data(
+    let (_total_collateral_in_base_currency, total_debt_in_base_currency, health_factor_v33) =
+        match calculate_user_account_data(
             price_cache.clone(),
             provider.clone(),
             uw_event.address,
             reserves_list.clone(),
             reserves_data.clone(),
             Some(uw_event.trace_id.clone()),
-        ).await {
+        )
+        .await
+        {
             Ok((collateral, debt, hf)) => (collateral, debt, hf),
             Err(e) => {
                 return Err(format!("Error calculating user account data: {}", e).into());
@@ -108,9 +103,12 @@ async fn process_uw_event(
         // these are not part of the profit calculation
         // they're here only for the purpose of submitting the appropriate parameters
         // to the liquidation function
-        let (collateral_to_weth_fee, weth_to_debt_fee) =
-            calculate_best_swap_fees(provider.clone(), best_pair.collateral_asset, best_pair.debt_asset)
-            .await;
+        let (collateral_to_weth_fee, weth_to_debt_fee) = calculate_best_swap_fees(
+            provider.clone(),
+            best_pair.collateral_asset,
+            best_pair.debt_asset,
+        )
+        .await;
         let bribe = calculate_bribe();
 
         info!(
@@ -121,25 +119,37 @@ async fn process_uw_event(
             uw_event.total_collateral_base,
         );
 
-        let foxdie_tx = match create_trigger_liquidation_tx(best_pair,
+        let foxdie_tx = match create_trigger_liquidation_tx(
+            best_pair,
             uw_event.address,
             collateral_to_weth_fee,
             weth_to_debt_fee,
             bribe,
-        ).await {
+        )
+        .await
+        {
             Ok(tx) => tx,
-            Err(e) => return Err(format!("Error creating foxdie tx: {}", e).into())
+            Err(e) => return Err(format!("Error creating foxdie tx: {}", e).into()),
         };
-        match mev_share_client.submit_simple_liquidation_bundle(
-            uw_event.tx_hash,
-            uw_event.raw_tx,
-            foxdie_tx,
-            uw_event.inclusion_block,
-        ).await {
+        match mev_share_client
+            .submit_simple_liquidation_bundle(
+                uw_event.tx_hash,
+                uw_event.raw_tx,
+                foxdie_tx,
+                uw_event.inclusion_block,
+            )
+            .await
+        {
             Ok(res) => {
                 info!("Submitted bundle. Response: {:?}", res);
-            },
-            Err(e) => return Err(format!("Error processing uw event for bundle {}: {}", uw_event.trace_id, e).into())
+            }
+            Err(e) => {
+                return Err(format!(
+                    "Error processing uw event for bundle {}: {}",
+                    uw_event.trace_id, e
+                )
+                .into())
+            }
         };
     } else {
         warn!(
@@ -179,10 +189,14 @@ async fn main() {
                     if !price_cache
                         .lock()
                         .await
-                        .override_price(cloned_uw_event.trace_id.clone(), cloned_uw_event.new_asset_prices)
-                        .await {
-                            warn!("Price(s) for uw_event with trace_id {} couldn't be overriden. Next calculations won't consider the pending price update TX values.", uw_event.trace_id);
-                        }
+                        .override_price(
+                            cloned_uw_event.trace_id.clone(),
+                            cloned_uw_event.new_asset_prices,
+                        )
+                        .await
+                    {
+                        warn!("Price(s) for uw_event with trace_id {} couldn't be overriden. Next calculations won't consider the pending price update TX values.", uw_event.trace_id);
+                    }
                     let price_cache = price_cache.clone();
                     tokio::spawn(async move {
                         if let Err(e) = process_uw_event(

@@ -57,7 +57,10 @@ async fn run_price_update_pipeline(
     let raw_tx = bundle.map_or(None, |b| b.raw_tx.clone());
     let inclusion_block = bundle.map_or("initial-run".to_string(), |b| b.inclusion_block.clone());
     if address_buckets.len() == 1 && address_buckets[0].is_empty() {
-        info!("Not processing bundle for trace_id {} because it doesn't contain any addresses", trace_id);
+        info!(
+            "Not processing bundle for trace_id {} because it doesn't contain any addresses",
+            trace_id
+        );
         return;
     }
     let fork_provider = match ForkProvider::new(bundle).await {
@@ -99,12 +102,18 @@ async fn run_price_update_pipeline(
     );
     let hf_traces_dir = format!("{}/hf-traces", output_data_dir);
     if !std::path::Path::new(output_data_dir).is_dir() {
-        error!("Output directory does not exist for bundle {}: {}", trace_id, output_data_dir);
+        error!(
+            "Output directory does not exist for bundle {}: {}",
+            trace_id, output_data_dir
+        );
         return;
     }
     std::fs::create_dir_all(&hf_traces_dir)
         .map_err(|e| {
-            error!("Failed to create hf-traces directory for bundle {}: {}", trace_id, e);
+            error!(
+                "Failed to create hf-traces directory for bundle {}: {}",
+                trace_id, e
+            );
         })
         .ok();
     let hf_traces_filepath = format!("{}/{}.txt", hf_traces_dir, trace_id);
@@ -145,17 +154,17 @@ async fn _dump_initial_hf_results(
             return Err(Box::new(e));
         }
     };
-    let init_hf_results =
-        get_hf_for_users(
-            user_buckets,
-            &provider,
-            None,
-            None,
-            None,
-            None,
-            vec![],
-            Some(event_bus)
-        ).await;
+    let init_hf_results = get_hf_for_users(
+        user_buckets,
+        &provider,
+        None,
+        None,
+        None,
+        None,
+        vec![],
+        Some(event_bus),
+    )
+    .await;
     let init_hf_results_filepath = format!(
         "{}/init_hf_under_1_results_{}.txt",
         output_data_dir,
@@ -318,7 +327,8 @@ async fn main() -> Result<(), String> {
         };
         match deserialized_message {
             MessageBundle::PriceUpdate(price_update) => {
-                let trace_id = Some(&price_update).map_or("initial-run".to_string(), |b| b.trace_id.clone());
+                let trace_id =
+                    Some(&price_update).map_or("initial-run".to_string(), |b| b.trace_id.clone());
                 info!("Vega received price update for trace_id {}", trace_id);
                 run_price_update_pipeline(
                     &mut user_reserves_cache,

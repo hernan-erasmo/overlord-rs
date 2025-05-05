@@ -1,9 +1,21 @@
 use std::sync::Arc;
 
-use alloy::{primitives::{address, Address}, providers::RootProvider, pubsub::PubSubFrontend};
+use alloy::{
+    primitives::{address, Address},
+    providers::RootProvider,
+    pubsub::PubSubFrontend,
+};
 use once_cell::sync::Lazy;
 
-use overlord_shared::sol_bindings::{sDAIAggregator::sDAISynchronicityPriceAdapter, CLSynchronicityPriceAdapterPegToBase, CbETHAggregator::CbETHPriceCapAdapter, EBTCAggregator::EBTCPriceCapAdapter, EthXAggregator::EthXPriceCapAdapter, OsETHAggregator::OsETHPriceCapAdapter, PendlePriceCapAggregator::PendlePriceCapAdapter, PriceCapAdapterStable, RETHAggregator::RETHPriceCapAdapter, RsETHAggregator::RsETHPriceCapAdapter, SUSDeAggregator::SUSDePriceCapAdapter, WeETHAggregator::WeETHPriceCapAdapter, WstETHAggregator::WstETHPriceCapAdapter};
+use overlord_shared::sol_bindings::{
+    sDAIAggregator::sDAISynchronicityPriceAdapter, CLSynchronicityPriceAdapterPegToBase,
+    CbETHAggregator::CbETHPriceCapAdapter, EBTCAggregator::EBTCPriceCapAdapter,
+    EthXAggregator::EthXPriceCapAdapter, OsETHAggregator::OsETHPriceCapAdapter,
+    PendlePriceCapAggregator::PendlePriceCapAdapter, PriceCapAdapterStable,
+    RETHAggregator::RETHPriceCapAdapter, RsETHAggregator::RsETHPriceCapAdapter,
+    SUSDeAggregator::SUSDePriceCapAdapter, WeETHAggregator::WeETHPriceCapAdapter,
+    WstETHAggregator::WstETHPriceCapAdapter,
+};
 
 /// These are living data structures, in the sense that will need to be updated if a new asset is onboarded
 /// into AAVE v3.
@@ -70,23 +82,17 @@ pub static CL_SYNCHRO_PRICE_PEG_ADAPTERS: Lazy<Vec<Address>> = Lazy::new(|| {
 });
 
 pub static SUSDE_PRICE_ADAPTERS: Lazy<Vec<Address>> = Lazy::new(|| {
-    let oracles = vec![
-        address!("42bc86f2f08419280a99d8fbEa4672e7c30a86ec"),
-    ];
+    let oracles = vec![address!("42bc86f2f08419280a99d8fbEa4672e7c30a86ec")];
     oracles
 });
 
 pub static SDAI_PRICE_ADAPTERS: Lazy<Vec<Address>> = Lazy::new(|| {
-    let oracles = vec![
-        address!("29081f7aB5a644716EfcDC10D5c926c5fEe9F72B"),
-    ];
+    let oracles = vec![address!("29081f7aB5a644716EfcDC10D5c926c5fEe9F72B")];
     oracles
 });
 
 pub static GHO_ADAPTER: Lazy<Vec<Address>> = Lazy::new(|| {
-    let oracles = vec![
-        address!("D110cac5d8682A3b045D5524a9903E031d70FCCd"),
-    ];
+    let oracles = vec![address!("D110cac5d8682A3b045D5524a9903E031d70FCCd")];
     oracles
 });
 
@@ -102,135 +108,222 @@ pub static PENDLE_PRICE_CAP_ADAPTERS: Lazy<Vec<Address>> = Lazy::new(|| {
 /// that aggregator doesn't implement `getTransmitters()`)
 pub async fn resolve_aggregator(
     provider: Arc<RootProvider<PubSubFrontend>>,
-    oracle_address_for_aave: Address
+    oracle_address_for_aave: Address,
 ) -> Result<Address, Box<dyn std::error::Error>> {
     match oracle_address_for_aave {
-        addr if EAC_AGGREGATOR_PROXY_ORACLES.contains(&addr) => 
-            Ok(resolve_eac_aggregator_proxy(provider, addr).await),
-            
-        addr if PRICE_CAP_ADAPTER_STABLE_ORACLES.contains(&addr) => 
-            Ok(resolve_asset_to_usd_aggregator(provider, addr).await),
-            
-        addr if SPECIFIC_PRICE_CAP_ADAPTERS.contains(&addr) => 
-            Ok(resolve_base_to_usd_aggregator(provider, addr).await),
-            
-        addr if CL_SYNCHRO_PRICE_PEG_ADAPTERS.contains(&addr) => 
-            Ok(resolve_asset_to_peg(provider, addr).await),
-            
-        addr if SUSDE_PRICE_ADAPTERS.contains(&addr) => 
-            Ok(resolve_susde_aggregator(provider, addr).await),
-            
-        addr if SDAI_PRICE_ADAPTERS.contains(&addr) => 
-            Ok(resolve_dai_to_usd_aggregator(provider, addr).await),
+        addr if EAC_AGGREGATOR_PROXY_ORACLES.contains(&addr) => {
+            Ok(resolve_eac_aggregator_proxy(provider, addr).await)
+        }
 
-        addr if PENDLE_PRICE_CAP_ADAPTERS.contains(&addr) =>
-            Ok(resolve_pendle_aggregator(provider, addr).await),
+        addr if PRICE_CAP_ADAPTER_STABLE_ORACLES.contains(&addr) => {
+            Ok(resolve_asset_to_usd_aggregator(provider, addr).await)
+        }
 
-        addr if GHO_ADAPTER.contains(&addr) =>
-            Ok(resolve_gho_aggregator(provider, addr).await),
+        addr if SPECIFIC_PRICE_CAP_ADAPTERS.contains(&addr) => {
+            Ok(resolve_base_to_usd_aggregator(provider, addr).await)
+        }
 
-        _ => return Err(format!("This price oracle didn't match any group: {}", oracle_address_for_aave).into())
+        addr if CL_SYNCHRO_PRICE_PEG_ADAPTERS.contains(&addr) => {
+            Ok(resolve_asset_to_peg(provider, addr).await)
+        }
+
+        addr if SUSDE_PRICE_ADAPTERS.contains(&addr) => {
+            Ok(resolve_susde_aggregator(provider, addr).await)
+        }
+
+        addr if SDAI_PRICE_ADAPTERS.contains(&addr) => {
+            Ok(resolve_dai_to_usd_aggregator(provider, addr).await)
+        }
+
+        addr if PENDLE_PRICE_CAP_ADAPTERS.contains(&addr) => {
+            Ok(resolve_pendle_aggregator(provider, addr).await)
+        }
+
+        addr if GHO_ADAPTER.contains(&addr) => Ok(resolve_gho_aggregator(provider, addr).await),
+
+        _ => {
+            return Err(format!(
+                "This price oracle didn't match any group: {}",
+                oracle_address_for_aave
+            )
+            .into())
+        }
     }
 }
 
-pub async fn resolve_eac_aggregator_proxy(_provider: Arc<RootProvider<PubSubFrontend>>, oracle_address_for_aave: Address) -> Address {
+pub async fn resolve_eac_aggregator_proxy(
+    _provider: Arc<RootProvider<PubSubFrontend>>,
+    oracle_address_for_aave: Address,
+) -> Address {
     oracle_address_for_aave
 }
 
-pub async fn resolve_gho_aggregator(_provider: Arc<RootProvider<PubSubFrontend>>, oracle_address_for_aave: Address) -> Address {
+pub async fn resolve_gho_aggregator(
+    _provider: Arc<RootProvider<PubSubFrontend>>,
+    oracle_address_for_aave: Address,
+) -> Address {
     oracle_address_for_aave
 }
 
-pub async fn resolve_asset_to_usd_aggregator(_provider: Arc<RootProvider<PubSubFrontend>>, oracle_address_for_aave: Address) -> Address {
-    match PriceCapAdapterStable::new(oracle_address_for_aave, _provider.clone()).ASSET_TO_USD_AGGREGATOR().call().await {
+pub async fn resolve_asset_to_usd_aggregator(
+    _provider: Arc<RootProvider<PubSubFrontend>>,
+    oracle_address_for_aave: Address,
+) -> Address {
+    match PriceCapAdapterStable::new(oracle_address_for_aave, _provider.clone())
+        .ASSET_TO_USD_AGGREGATOR()
+        .call()
+        .await
+    {
         Ok(response) => response._0,
         Err(_) => Address::ZERO,
     }
 }
 
-pub async fn resolve_asset_to_peg(_provider: Arc<RootProvider<PubSubFrontend>>, oracle_address_for_aave: Address) -> Address {
-    match CLSynchronicityPriceAdapterPegToBase::new(oracle_address_for_aave, _provider.clone()).ASSET_TO_PEG().call().await {
+pub async fn resolve_asset_to_peg(
+    _provider: Arc<RootProvider<PubSubFrontend>>,
+    oracle_address_for_aave: Address,
+) -> Address {
+    match CLSynchronicityPriceAdapterPegToBase::new(oracle_address_for_aave, _provider.clone())
+        .ASSET_TO_PEG()
+        .call()
+        .await
+    {
         Ok(response) => response._0,
-        Err(_) => Address::ZERO,        
+        Err(_) => Address::ZERO,
     }
 }
 
-pub async fn resolve_susde_aggregator(_provider: Arc<RootProvider<PubSubFrontend>>, oracle_address_for_aave: Address) -> Address {
-    let base_to_usd_aggregator = match SUSDePriceCapAdapter::new(
-        oracle_address_for_aave,
-        _provider.clone())
-    .BASE_TO_USD_AGGREGATOR().call().await {
-        Ok(response) => response._0,
-        Err(_) => Address::ZERO
-    };
+pub async fn resolve_susde_aggregator(
+    _provider: Arc<RootProvider<PubSubFrontend>>,
+    oracle_address_for_aave: Address,
+) -> Address {
+    let base_to_usd_aggregator =
+        match SUSDePriceCapAdapter::new(oracle_address_for_aave, _provider.clone())
+            .BASE_TO_USD_AGGREGATOR()
+            .call()
+            .await
+        {
+            Ok(response) => response._0,
+            Err(_) => Address::ZERO,
+        };
     resolve_asset_to_usd_aggregator(_provider.clone(), base_to_usd_aggregator).await
 }
 
-pub async fn resolve_dai_to_usd_aggregator(_provider: Arc<RootProvider<PubSubFrontend>>, oracle_address_for_aave: Address) -> Address {
-    match sDAISynchronicityPriceAdapter::new(oracle_address_for_aave, _provider.clone()).DAI_TO_USD().call().await {
+pub async fn resolve_dai_to_usd_aggregator(
+    _provider: Arc<RootProvider<PubSubFrontend>>,
+    oracle_address_for_aave: Address,
+) -> Address {
+    match sDAISynchronicityPriceAdapter::new(oracle_address_for_aave, _provider.clone())
+        .DAI_TO_USD()
+        .call()
+        .await
+    {
         Ok(response) => response._0,
         Err(_) => Address::ZERO,
     }
 }
 
-pub async fn resolve_pendle_aggregator(_provider: Arc<RootProvider<PubSubFrontend>>, oracle_address_for_aave: Address) -> Address {
-    let asset_to_usd_aggregator_address = match PendlePriceCapAdapter::new(oracle_address_for_aave, _provider.clone()).ASSET_TO_USD_AGGREGATOR().call().await {
-        Ok(response) => response._0,
-        Err(_) => Address::ZERO,
-    };
+pub async fn resolve_pendle_aggregator(
+    _provider: Arc<RootProvider<PubSubFrontend>>,
+    oracle_address_for_aave: Address,
+) -> Address {
+    let asset_to_usd_aggregator_address =
+        match PendlePriceCapAdapter::new(oracle_address_for_aave, _provider.clone())
+            .ASSET_TO_USD_AGGREGATOR()
+            .call()
+            .await
+        {
+            Ok(response) => response._0,
+            Err(_) => Address::ZERO,
+        };
     resolve_asset_to_usd_aggregator(_provider.clone(), asset_to_usd_aggregator_address).await
 }
 
-pub async fn resolve_base_to_usd_aggregator(_provider: Arc<RootProvider<PubSubFrontend>>, oracle_address_for_aave: Address) -> Address {
+pub async fn resolve_base_to_usd_aggregator(
+    _provider: Arc<RootProvider<PubSubFrontend>>,
+    oracle_address_for_aave: Address,
+) -> Address {
     match oracle_address_for_aave {
         addr if addr == address!("B4aB0c94159bc2d8C133946E7241368fc2F2a010") => {
-            match WstETHPriceCapAdapter::new(oracle_address_for_aave, _provider.clone()).BASE_TO_USD_AGGREGATOR().call().await {
+            match WstETHPriceCapAdapter::new(oracle_address_for_aave, _provider.clone())
+                .BASE_TO_USD_AGGREGATOR()
+                .call()
+                .await
+            {
                 Ok(response) => response._0,
                 Err(_) => Address::ZERO,
             }
-        },
+        }
         addr if addr == address!("6243d2F41b4ec944F731f647589E28d9745a2674") => {
-            match CbETHPriceCapAdapter::new(oracle_address_for_aave, _provider.clone()).BASE_TO_USD_AGGREGATOR().call().await {
+            match CbETHPriceCapAdapter::new(oracle_address_for_aave, _provider.clone())
+                .BASE_TO_USD_AGGREGATOR()
+                .call()
+                .await
+            {
                 Ok(response) => response._0,
                 Err(_) => Address::ZERO,
             }
-        },
+        }
         addr if addr == address!("5AE8365D0a30D67145f0c55A08760C250559dB64") => {
-            match RETHPriceCapAdapter::new(oracle_address_for_aave, _provider.clone()).BASE_TO_USD_AGGREGATOR().call().await {
+            match RETHPriceCapAdapter::new(oracle_address_for_aave, _provider.clone())
+                .BASE_TO_USD_AGGREGATOR()
+                .call()
+                .await
+            {
                 Ok(response) => response._0,
                 Err(_) => Address::ZERO,
             }
-        },
+        }
         addr if addr == address!("95a85D0d2f3115702d813549a80040387738A430") => {
-            match EBTCPriceCapAdapter::new(oracle_address_for_aave, _provider.clone()).BASE_TO_USD_AGGREGATOR().call().await {
+            match EBTCPriceCapAdapter::new(oracle_address_for_aave, _provider.clone())
+                .BASE_TO_USD_AGGREGATOR()
+                .call()
+                .await
+            {
                 Ok(response) => response._0,
                 Err(_) => Address::ZERO,
             }
-        },
+        }
         addr if addr == address!("f112aF6F0A332B815fbEf3Ff932c057E570b62d3") => {
-            match WeETHPriceCapAdapter::new(oracle_address_for_aave, _provider.clone()).BASE_TO_USD_AGGREGATOR().call().await {
+            match WeETHPriceCapAdapter::new(oracle_address_for_aave, _provider.clone())
+                .BASE_TO_USD_AGGREGATOR()
+                .call()
+                .await
+            {
                 Ok(response) => response._0,
                 Err(_) => Address::ZERO,
             }
-        },
+        }
         addr if addr == address!("0A2AF898cEc35197e6944D9E0F525C2626393442") => {
-            match OsETHPriceCapAdapter::new(oracle_address_for_aave, _provider.clone()).BASE_TO_USD_AGGREGATOR().call().await {
+            match OsETHPriceCapAdapter::new(oracle_address_for_aave, _provider.clone())
+                .BASE_TO_USD_AGGREGATOR()
+                .call()
+                .await
+            {
                 Ok(response) => response._0,
                 Err(_) => Address::ZERO,
             }
-        },
+        }
         addr if addr == address!("D6270dAabFe4862306190298C2B48fed9e15C847") => {
-            match EthXPriceCapAdapter::new(oracle_address_for_aave, _provider.clone()).BASE_TO_USD_AGGREGATOR().call().await {
+            match EthXPriceCapAdapter::new(oracle_address_for_aave, _provider.clone())
+                .BASE_TO_USD_AGGREGATOR()
+                .call()
+                .await
+            {
                 Ok(response) => response._0,
                 Err(_) => Address::ZERO,
             }
-        },
+        }
         addr if addr == address!("47F52B2e43D0386cF161e001835b03Ad49889e3b") => {
-            match RsETHPriceCapAdapter::new(oracle_address_for_aave, _provider.clone()).BASE_TO_USD_AGGREGATOR().call().await {
+            match RsETHPriceCapAdapter::new(oracle_address_for_aave, _provider.clone())
+                .BASE_TO_USD_AGGREGATOR()
+                .call()
+                .await
+            {
                 Ok(response) => response._0,
                 Err(_) => Address::ZERO,
             }
-        },
+        }
         _ => Address::ZERO,
     }
 }
