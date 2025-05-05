@@ -89,10 +89,7 @@ impl MevShareService {
         foxdie_tx: TypedTransaction,
         inclusion_block: String,
     ) -> Result<SendBundleResponse, Box<dyn std::error::Error>> {
-        let signature = self
-            .tx_signer
-            .sign_transaction(&foxdie_tx.clone())
-            .await?;
+        let signature = self.tx_signer.sign_transaction(&foxdie_tx.clone()).await?;
         let bytes = foxdie_tx.rlp_signed(&signature);
         let backrun_tx: BundleItem;
         if let Some(raw) = raw_tx {
@@ -107,7 +104,9 @@ impl MevShareService {
                 hash: H256::from_str(&pub_hash)?,
             };
         } else {
-            return Err("Didn't get a tx hash or raw data to backrun".to_string().into());
+            return Err("Didn't get a tx hash or raw data to backrun"
+                .to_string()
+                .into());
         };
         let bundle_body = vec![
             backrun_tx,

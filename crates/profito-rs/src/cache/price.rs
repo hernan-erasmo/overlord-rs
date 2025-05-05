@@ -51,10 +51,7 @@ impl PriceCache {
         }
 
         // Get or create the prices HashMap for this trace_id
-        let prices = self
-            .prices
-            .entry(trace_id.clone())
-            .or_default();
+        let prices = self.prices.entry(trace_id.clone()).or_default();
 
         for (reserve, symbol, new_price) in new_prices_by_asset.iter() {
             prices.insert(*reserve, *new_price);
