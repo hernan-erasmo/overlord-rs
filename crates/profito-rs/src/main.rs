@@ -51,7 +51,7 @@ async fn process_uw_event(
         }
     };
     let user_reserve_data = get_user_reserves_data(provider.clone(), uw_event.address).await;
-    if user_reserve_data.len() == 0 {
+    if user_reserve_data.is_empty() {
         return Err("User reserves data came back empty".into());
     };
 

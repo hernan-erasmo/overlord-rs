@@ -122,6 +122,7 @@ sol!(
     "src/abis/AuthorizedForwarder.json"
 );
 
+#[allow(non_snake_case)]
 pub mod WstETHAggregator {
     use alloy::sol;
     sol!(
@@ -134,6 +135,7 @@ pub mod WstETHAggregator {
     );
 }
 
+#[allow(non_snake_case)]
 pub mod PendlePriceCapAggregator {
     use alloy::sol;
     sol!(
@@ -146,6 +148,7 @@ pub mod PendlePriceCapAggregator {
     );
 }
 
+#[allow(non_snake_case)]
 pub mod CbETHAggregator {
     use alloy::sol;
     sol!(
@@ -158,6 +161,7 @@ pub mod CbETHAggregator {
     );
 }
 
+#[allow(non_snake_case)]
 pub mod RETHAggregator {
     use alloy::sol;
     sol!(
@@ -170,6 +174,7 @@ pub mod RETHAggregator {
     );
 }
 
+#[allow(non_snake_case)]
 pub mod EBTCAggregator {
     use alloy::sol;
     sol!(
@@ -182,6 +187,7 @@ pub mod EBTCAggregator {
     );
 }
 
+#[allow(non_snake_case)]
 pub mod WeETHAggregator {
     use alloy::sol;
     sol!(
@@ -194,6 +200,7 @@ pub mod WeETHAggregator {
     );
 }
 
+#[allow(non_snake_case)]
 pub mod OsETHAggregator {
     use alloy::sol;
     sol!(
@@ -206,6 +213,7 @@ pub mod OsETHAggregator {
     );
 }
 
+#[allow(non_snake_case)]
 pub mod EthXAggregator {
     use alloy::sol;
     sol!(
@@ -218,6 +226,7 @@ pub mod EthXAggregator {
     );
 }
 
+#[allow(non_snake_case)]
 pub mod SUSDeAggregator {
     use alloy::sol;
     sol!(
@@ -230,6 +239,7 @@ pub mod SUSDeAggregator {
     );
 }
 
+#[allow(non_snake_case)]
 pub mod sDAIAggregator {
     use alloy::sol;
     sol!(
@@ -242,6 +252,7 @@ pub mod sDAIAggregator {
     );
 }
 
+#[allow(non_snake_case)]
 pub mod RsETHAggregator {
     use alloy::sol;
     sol!(
