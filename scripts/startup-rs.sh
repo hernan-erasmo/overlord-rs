@@ -91,10 +91,16 @@ start_vega() {
         force_pmex_update=true
     fi
 
+    # Check if virtual environment is activated correctly
     source "$VENV_DIR/bin/activate"
+    if [[ "$VIRTUAL_ENV" != "$VENV_DIR" ]]; then
+        echo "startup-rs.sh # Failed to activate virtual environment at $VENV_DIR"
+        exit 1
+    fi
+    echo "startup-rs.sh # Virtual environment activated at $VIRTUAL_ENV"
     echo "startup-rs.sh # Running $SCRIPT_DIR/run_pmex.py with force-pmex-update=$force_pmex_update"
     VEGA_ADDRESSES_FILE=$(DATA_DIR="$DATA_DIR" python3 $SCRIPT_DIR/run_pmex.py --force-pmex-update="$force_pmex_update" | tee /dev/tty | tail -n1)
-    deactivate
+    source deactivate
 
     # Check if output is empty
     if ! [[ "$VEGA_ADDRESSES_FILE" =~ "addresses_" && "$VEGA_ADDRESSES_FILE" =~ \.txt$ ]]; then
