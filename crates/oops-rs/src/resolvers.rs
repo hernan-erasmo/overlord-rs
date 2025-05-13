@@ -54,6 +54,7 @@ pub static PRICE_CAP_ADAPTER_STABLE_ORACLES: Lazy<Vec<Address>> = Lazy::new(|| {
         address!("150bAe7Ce224555D39AfdBc6Cb4B8204E594E022"),
         address!("9eCdfaCca946614cc32aF63F3DBe50959244F3af"),
         address!("f0eaC18E908B34770FDEe46d069c846bDa866759"),
+        address!("2FA6A78E3d617c1013a22938411602dc9Da98dBa"),
     ];
     oracles
 });
@@ -69,6 +70,7 @@ pub static SPECIFIC_PRICE_CAP_ADAPTERS: Lazy<Vec<Address>> = Lazy::new(|| {
         address!("D6270dAabFe4862306190298C2B48fed9e15C847"),
         address!("47F52B2e43D0386cF161e001835b03Ad49889e3b"),
         address!("95a85D0d2f3115702d813549a80040387738A430"),
+        address!("577C217cB5b1691A500D48aA7F69346409cFd668"),
     ];
     oracles
 });
@@ -77,6 +79,7 @@ pub static CL_SYNCHRO_PRICE_PEG_ADAPTERS: Lazy<Vec<Address>> = Lazy::new(|| {
     let oracles = vec![
         address!("230E0321Cf38F09e247e50Afc7801EA2351fe56F"),
         address!("b01e6C9af83879B8e06a092f0DD94309c0D497E4"),
+        address!("Daa4B74C6bAc4e25188e64ebc68DB5050b690cAc"),
     ];
     oracles
 });
@@ -275,6 +278,16 @@ pub async fn resolve_base_to_usd_aggregator(
             }
         }
         addr if addr == address!("95a85D0d2f3115702d813549a80040387738A430") => {
+            match EBTCPriceCapAdapter::new(oracle_address_for_aave, _provider.clone())
+                .BASE_TO_USD_AGGREGATOR()
+                .call()
+                .await
+            {
+                Ok(response) => response._0,
+                Err(_) => Address::ZERO,
+            }
+        }
+        addr if addr == address!("577C217cB5b1691A500D48aA7F69346409cFd668") => {
             match EBTCPriceCapAdapter::new(oracle_address_for_aave, _provider.clone())
                 .BASE_TO_USD_AGGREGATOR()
                 .call()

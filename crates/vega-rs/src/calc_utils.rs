@@ -7,7 +7,7 @@ use futures::future::join_all;
 use overlord_shared::{sol_bindings::pool::AaveV3Pool, UnderwaterUserEvent};
 use std::{collections::HashMap, sync::Arc};
 use tokio::{sync::broadcast, task};
-use tracing::warn;
+use tracing::{info, warn};
 
 const HF_MIN_THRESHOLD: u128 = 1_000_000_000_000_000_000u128;
 
@@ -106,6 +106,10 @@ pub async fn get_hf_for_users(
         });
         tasks.push(task);
     }
+    info!(
+        "About to start HF calculation tasks for bundle {}",
+        trace_id.as_deref().unwrap_or("initial-run")
+    );
     let bucket_aggregate_results: Vec<HashMap<Address, U256>> = join_all(tasks)
         .await
         .into_iter()
