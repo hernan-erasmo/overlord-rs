@@ -1,13 +1,32 @@
 use alloy::{
     eips::BlockNumberOrTag,
     network::TransactionBuilder,
-    node_bindings::anvil::{Anvil, AnvilInstance},
-    primitives::U256,
-    providers::{ext::AnvilApi, IpcConnect, Provider, ProviderBuilder, RootProvider},
-    rpc::types::{Block, BlockId, BlockTransactionsKind, TransactionRequest},
+    node_bindings::anvil::{
+        Anvil,
+        AnvilInstance
+    }, primitives::{
+        FixedBytes,
+        keccak256,
+        U256
+    }, providers::{
+        ext::AnvilApi,
+        IpcConnect,
+        Provider,
+        ProviderBuilder,
+        RootProvider
+    }, pubsub::PubSubFrontend,
+    rpc::types::{
+        Block,
+        BlockId,
+        BlockTransactionsKind,
+        TransactionRequest
+    }
 };
 use eyre::Result;
-use overlord_shared::PriceUpdateBundle;
+use overlord_shared::{
+    PriceUpdateBundle,
+    sol_bindings::AccessControlledOCR2Aggregator,
+};
 use std::{fs::File, panic, sync::Arc};
 use tracing::{error, info, warn};
 
@@ -55,6 +74,97 @@ async fn build_pub_tx(
         .gas_limit(forked_block.header.gas_limit)
         .max_fee_per_gas(max_fee)
         .max_priority_fee_per_gas(max_priority_fee)
+}
+
+async fn get_storage_key_for_price_update(
+    provider: RootProvider<PubSubFrontend>,
+    bundle: &PriceUpdateBundle,
+) -> Result<U256, Box<dyn std::error::Error>> {
+    // How I got to this number?
+    //
+    // 1. forge install https://github.com/smartcontractkit/libocr
+    // 2. that should include a `lib` folder. If you run `forge inspect ./lib/libocr/contract2/ORC2Aggregator.sol storage-layout`
+    //    you should get a table with lots of details, including:
+    //
+    // ╭-------------------------------+-------------------------------------------------------+------+--------+-------+--------------------------------------------------------╮
+    // | Name                          | Type                                                  | Slot | Offset | Bytes | Contract                                               |
+    // +========================================================================================================================================================================+
+    // | s_transmissions               | mapping(uint32 => struct OCR2Aggregator.Transmission) | 12   | 0      | 32    | lib/libocr/contract2/OCR2Aggregator.sol:OCR2Aggregator |
+    // ╰-------------------------------+-------------------------------------------------------+------+--------+-------+--------------------------------------------------------╯
+    //
+    const S_TRANSMISSIONS_SLOT: u8 = 12;
+    let round_id = match AccessControlledOCR2Aggregator::new(bundle.forward_to, provider).latestRound().call().await {
+        Ok(latestRound) => latestRound._0,
+        Err(e) => return Err(format!("Failed to get latestRound from aggregator {}: {}", bundle.forward_to, e).into())
+    };
+
+    // Convert round_id to U256 and left-pad it to 32 bytes
+    let padded_key = U256::from(round_id);
+
+    // Convert S_TRANSMISSIONS_SLOT to U256 and left-pad it to 32 bytes
+    let padded_slot = U256::from(S_TRANSMISSIONS_SLOT);
+
+    // Calculate the storage key using keccak256(abi.encode(key, slot))
+    // This is the Solidity mapping key calculation formula: keccak256(abi.encode(key, slot))
+    // We need to concatenate the padded key and slot as bytes
+    // First, convert them to 32-byte arrays
+    let mut combined = [0u8; 64];
+
+    padded_key.to_be_bytes_vec().iter().enumerate().for_each(|(i, b)| {
+        if i < 32 {
+            combined[i] = *b;
+        }
+    });
+
+    padded_slot.to_be_bytes_vec().iter().enumerate().for_each(|(i, b)| {
+        if i < 32 {
+            combined[i + 32] = *b;
+        }
+    });
+
+    // Hash the combined bytes
+    let hashed = keccak256(&combined);
+
+    // Convert the hash to a U256
+    Ok(U256::from_be_slice(hashed.as_slice()))
+}
+
+/// Encode the payload for setting the storage slot.
+///
+/// The payload is a packed struct with the following fields:
+/// - int192 answer
+/// - uint32 observationsTimestamp
+/// - uint32 transmissionTimestamp
+///
+/// Expected:  0x680d728f680d727a000000000000000000000000000000000000000005f5d6e3
+///              └─ts1──┘└──ts2─┘                                 └───answer────┘
+///
+fn get_payload_for_price_update(bundle: &PriceUpdateBundle) -> FixedBytes<32> {
+    // We just need a timestamp, the actual value doesn't really matter
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as u32;
+
+    // Create a 32-byte array to hold our result
+    let mut bytes = [0u8; 32];
+
+    // Put timestamps at the beginning (bytes 0-7)
+    // First timestamp (bytes 0-3)
+    bytes[0..4].copy_from_slice(&timestamp.to_be_bytes());
+    // Second timestamp (bytes 4-7)
+    bytes[4..8].copy_from_slice(&timestamp.to_be_bytes());
+
+    // The price (answer) needs to be in the last 24 bytes (bytes 8-31)
+    // Get the price as bytes - U256 uses 32 bytes, but we need just 24 bytes
+    let price_bytes: [u8; 32] = bundle.tx_new_price.to_be_bytes_vec().try_into().unwrap_or([0; 32]);
+
+    // We need to copy the last 24 bytes of the price (32-byte value)
+    // This preserves the big-endian representation while truncating to 24 bytes
+    bytes[8..32].copy_from_slice(&price_bytes[8..32]);
+
+    // Convert to FixedBytes<32>
+    FixedBytes::from_slice(&bytes)
 }
 
 pub struct ForkProvider {
@@ -171,81 +281,37 @@ impl ForkProvider {
         // Step 4: Apply the price update to the fork
         if let Some(bundle) = bundle {
             // Step 4.0: Fund the account the tx comes from, to prevent failures when applying the tx
+            let storage_key = get_storage_key_for_price_update(provider.clone(), &bundle.clone()).await.unwrap();
+            let storage_value = get_payload_for_price_update(&bundle.clone());
+            info!("About to call anvil_setStorageAt({}, {:?}, {:?})", bundle.forward_to, storage_key, storage_value);
             match fork_provider
                 .as_ref()
                 .unwrap()
-                .anvil_set_balance(bundle.tx_from, U256::from(1e20))
+                // The way price updates work, is that some address submits
+                // a transaction that calls the forward() method on a contract.
+                // That forward() method receives 2 args: `to_address` and `data`
+                // In anvil_setStorageAt, the first argument is that `to_address`,
+                // that we receive from the bundle in the `forward_to` attribute
+                .anvil_set_storage_at(
+                    bundle.forward_to,
+                    storage_key,
+                    storage_value,
+                )
                 .await
             {
                 Ok(_) => {
-                    info!("Funded account {} for bundle {}", bundle.tx_from, trace_id);
+                    info!("Successfuly set storage for bundle {}", trace_id);
                 }
                 Err(e) => {
                     error!(
-                        "Failed to fund account {} for bundle {}: {:?}",
-                        bundle.tx_from, trace_id, e
+                        "Failed to set storage for bundle {}: {:?}",
+                        trace_id, e
                     );
                     Self::cleanup_anvil_instance(&mut anvil);
-                    return Err("Failed to fund account".to_string());
+                    return Err("Failed to set storage".to_string());
                 }
             }
-            // Step 4.1: Build the price update tx
-            let nonce = provider
-                .get_transaction_count(bundle.tx_from)
-                .await
-                .unwrap();
-            let forked_block_clone = block_to_be_forked.clone();
-            let pub_tx = build_pub_tx(bundle, forked_block_clone, nonce).await;
-            info!("TX to send to fork for bundle {}: {:?}", trace_id, pub_tx);
-            // Step 4.2: Send it to the fork
-            let pending_tx = match fork_provider
-                .as_ref()
-                .unwrap()
-                .send_transaction(pub_tx)
-                .await
-            {
-                Ok(response) => response,
-                Err(e) => {
-                    error!(
-                        "Failed to send price update tx to fork for bundle {}: {:?}",
-                        trace_id, e
-                    );
-                    Self::cleanup_anvil_instance(&mut anvil);
-                    return Err("Failed to send price update tx to fork".to_string());
-                }
-            };
-            // Step 4.3: Get the price update tx receipt
-            match pending_tx.get_receipt().await {
-                Ok(receipt) => receipt,
-                Err(e) => {
-                    error!(
-                        "Failed to get receipt for price update tx for bundle {}: {:?}",
-                        trace_id, e
-                    );
-                    Self::cleanup_anvil_instance(&mut anvil);
-                    return Err("Failed to get receipt for price update tx".to_string());
-                }
-            };
-            // Step 4.4: Validate a new block was mined on the fork
-            let new_block_number = match fork_provider.as_ref().unwrap().get_block_number().await {
-                Ok(block) => block,
-                Err(e) => {
-                    error!(
-                        "Failed to get block number after applying price update tx for bundle {}: {:?}",
-                        trace_id,
-                        e
-                    );
-                    Self::cleanup_anvil_instance(&mut anvil);
-                    return Err(
-                        "Failed to get block number after applying price update tx".to_string()
-                    );
-                }
-            };
-            info!(
-                trace_id = trace_id,
-                block_number = %new_block_number,
-                "Applied bundle tx receipt"
-            );
+            info!("Storage in fork for bundle {} has been tweaked", trace_id);
         }
         // Step 5: Return the fork provider with the new state
         Ok((anvil, fork_provider, ipc_fork_file))
