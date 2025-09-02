@@ -8,8 +8,8 @@ overlord-rs is a distributed system composed of five specialized components that
 
 ```
 ┌─────────────┐    ┌──────────────────┐    ┌─────────────┐
-│   oops-rs   │    │  whistleblower-rs │    │   vega-rs   │
-│  (Oracle    │    │   (Event Listener)│    │   (Brain)   │
+│   oops-rs   │    │ whistleblower-rs │    │   vega-rs   │
+│  (Oracle    │    │ (Event Listener) │    │   (Brain)   │
 │  Scout)     │────┤                  │────┤             │
 └─────────────┘    └──────────────────┘    └─────────────┘
                                                    │
@@ -18,11 +18,11 @@ overlord-rs is a distributed system composed of five specialized components that
                                            │ profito-rs  │
                                            │(Liquidator) │
                                            └─────────────┘
-                              ┌─────────────┐
-                              │overlord-    │
-                              │shared       │
-                              │(Common Utils)│
-                              └─────────────┘
+                              ┌─────────────────┐
+                              │ overlord-shared │
+                              │                 │
+                              │  (Common Utils) │
+                              └─────────────────┘
 ```
 
 ### Key Components
@@ -77,7 +77,7 @@ Key variables needed in `.env`:
 - Rust 1.70+
 - Access to an Ethereum node (Reth recommended via IPC)
 - MEV-Share access
-- Deployed Foxdie liquidation contract
+- Deployed liquidation contract
 
 ## Performance Characteristics
 
