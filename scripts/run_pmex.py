@@ -12,7 +12,7 @@ from dune_client.query import QueryBase
 
 import requests
 
-DUNE_API_KEY="klzhPhytFhAn5aDzINUSOOnISUleJdC9" # pmex_api_key
+DUNE_API_KEY="klzhPhytFhAn5aDzINUSOOnISUleJdC9" # pmex_api_key, already revoked, use your own
 DUNE_API_BASE_URL="https://api.dune.com"
 DUNE_API_REQUEST_TIMEOUT=30
 PERFORMANCE="medium" # consumes 20 credits out of 2500/month. Lowest performance possible
