@@ -126,13 +126,6 @@ pub struct PriceUpdateBundle {
 2. **Parsing Errors**: May indicate changes in Chainlink submission format
 3. **Connection Issues**: Automatic reconnection with exponential backoff
 
-## Performance Metrics
-
-- **Latency**: ~100ms from mempool detection to vega-rs notification
-- **Throughput**: Handles 1000+ transactions/second scanning
-- **Memory**: ~50MB baseline with bounded growth
-- **CPU**: Low overhead due to efficient filtering
-
 ## Building
 
 ```bash

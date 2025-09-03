@@ -4,7 +4,15 @@ The AAVE v3 event monitoring component that tracks protocol events affecting use
 
 ## Overview
 
-whistleblower-rs serves as the "change detector" for the overlord-rs system. It monitors AAVE v3 protocol events that could affect user positions and health factors, ensuring the system stays synchronized with on-chain state changes without expensive full recalculations.
+whistleblower-rs serves as the "change detector" for the overlord-rs system. It monitors AAVE v3 protocol events that could affect user positions and health factors, ensuring borrower's data stays synchronized with on-chain state changes without full recalculations.
+
+## Data Flow
+
+1. **Event Subscription**: Connect to AAVE v3 Pool contract events
+2. **Event Filtering**: Process only liquidation-relevant events
+3. **Data Enrichment**: Extract user, asset, and amount information
+4. **Message Creation**: Build `WhistleblowerUpdate` with event details
+5. **ZMQ Forwarding**: Send update to vega-rs for cache updates
 
 ## Architecture
 
@@ -29,10 +37,10 @@ whistleblower-rs serves as the "change detector" for the overlord-rs system. It 
 ## Monitored Events
 
 ### Core AAVE v3 Events
-1. **LiquidationCall** - Direct liquidations affecting health factors
-2. **Borrow** - New debt positions that reduce health factors  
-3. **Supply** - New collateral that improves health factors
-4. **Repay** - Debt reductions that improve health factors
+1. **LiquidationCall** - Direct liquidations affecting health factor
+2. **Borrow** - New debt positions that reduce health factor  
+3. **Supply** - New collateral that improves health factor
+4. **Repay** - Debt reductions that improve health factor
 
 ### Event Processing
 Each event is decoded and enriched with:
@@ -57,21 +65,12 @@ let combined_stream = select_all(streams);
 
 ### 2. Intelligent Filtering
 - Only processes events that could affect liquidation status
-- Filters out dust transactions below meaningful thresholds
-- Focuses on reserves tracked by the system
+- Focuses only on reserves tracked by the system
 
 ### 3. Robust Connection Management
 - Automatic reconnection on WebSocket failures
 - Graceful handling of RPC endpoint issues
 - Continuous operation during network instability
-
-## Data Flow
-
-1. **Event Subscription**: Connect to AAVE v3 Pool contract events
-2. **Event Filtering**: Process only liquidation-relevant events
-3. **Data Enrichment**: Extract user, asset, and amount information
-4. **Message Creation**: Build `WhistleblowerUpdate` with event details
-5. **ZMQ Forwarding**: Send update to vega-rs for cache updates
 
 ## Message Format
 
@@ -146,18 +145,6 @@ const BORROW_TOPIC: FixedBytes<32> = keccak256("Borrow(...)");
 - Continues operation on individual event failures
 - Comprehensive error logging with context
 - Duplicate event detection and handling
-
-### Common Issues
-1. **Connection Drops**: Handled via automatic reconnection
-2. **Event Parsing Errors**: May indicate AAVE protocol changes
-3. **High Event Volume**: Managed through efficient streaming
-
-## Performance Characteristics
-
-- **Latency**: ~500ms from event emission to vega-rs notification
-- **Throughput**: Handles burst periods of 100+ events/second
-- **Memory**: ~30MB baseline with bounded growth
-- **CPU**: Minimal overhead due to event-driven architecture
 
 ## Integration with vega-rs
 
