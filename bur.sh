@@ -1,5 +1,42 @@
 #!/bin/bash
 
+#!/bin/bash
+
+# BUR (Backtest User Reserves) - Liquidation Analysis Tool
+#
+# This script helps debug and analyze past liquidations by providing detailed information
+# about liquidation opportunities for a given user address.
+#
+# Given:
+# - A user address (the user that was liquidated)
+# - A price update transaction hash (containing the forward() call that triggered liquidation conditions)
+# - A block number (the block BEFORE the price update transaction landed)
+#
+# BUR will:
+# 1. Fork the blockchain at the specified block to capture pre-liquidation state
+# 2. Replay the price update transaction to trigger liquidation conditions
+# 3. Calculate all possible liquidation combinations (reserve/collateral pairs)
+# 4. Identify the most profitable liquidation combination
+# 5. Calculate exact profit amounts and input parameters for the foxdie contract
+# 6. Determine the optimal flashloan provider for maximum profitability
+#
+# This tool is essential for:
+# - Backtesting liquidation strategies
+# - Analyzing missed liquidation opportunities
+# - Optimizing liquidation bot parameters
+# - Understanding liquidation mechanics and profitability
+#
+# Usage: ./bur.sh <user_address> <block_number> <tx_hash> [--use-third-party-provider <url>]
+#
+# Example:
+#
+# # If you already have a local reth node running with an IPC endpoint at /tmp/reth.ipc
+# ./bur.sh 0x5f978d56aedabf9d03b8368bcab47e57c50aa06b 22512129 0x0e7d9f0ec6f83fd7d53af926fc681cfeb3fa5cd4d4e6dcc952dd7c0fdf117a12
+#
+# # If you want to use a third-party provider (e.g. Alchemy, Infura) instead of a local node
+# # ./bur.sh 0x5f978d56aedabf9d03b8368bcab47e57c50aa06b 22512129 0x0e7d9f0ec6f83fd7d53af926fc681cfeb3fa5cd4d4e6dcc952dd7c0fdf117a12 --use-third-party-provider https://eth-mainnet.g.alchemy.com/v2/KEY
+#
+
 # Exit on any error
 set -e
 
