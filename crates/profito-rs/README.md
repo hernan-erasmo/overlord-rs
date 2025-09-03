@@ -4,7 +4,7 @@ The liquidation execution engine that calculates optimal liquidation parameters 
 
 ## Overview
 
-profito-rs is the "profit engine" of overlord-rs. It receives underwater user alerts from vega-rs, replicates AAVE's liquidation logic in Rust for optimal parameter calculation, determines the most profitable liquidation strategy, and crafts MEV bundles for submission to block builders.
+profito-rs is the "profit engine" of overlord-rs. It receives underwater user alerts from vega-rs, replicates AAVE's liquidation logic in Rust for parameter calculation, determines the most profitable liquidation strategy, and crafts MEV bundles for submission to block builders.
 
 ## Architecture
 
@@ -48,7 +48,7 @@ The net profitability calculation has three components:
 
 **Deterministic Costs:**
 - Gas fees: `GasUsed × (BaseFee + PriorityFee)`
-- Flash loan fees: `DebtRepaid × FlashLoanRate` (typically 0.05%)
+- Flash loan fees: `DebtRepaid × FlashLoanRate`
 - Slippage costs: `CollateralToReceive × SlippageRate`
 
 **Non-Deterministic Costs:**
@@ -178,7 +178,7 @@ let results = join_all(tasks).await;
 
 ## Foxdie Contract Integration
 
-profito-rs integrates with a custom liquidation contract (Foxdie) that:
+profito-rs integrates with a custom liquidation contract (Foxdie) which handles:
 
 1. **Flash Loan Management**: Handles multiple liquidity sources
 2. **Atomic Liquidations**: Ensures all-or-nothing execution
@@ -195,23 +195,6 @@ let foxdie_call = Foxdie::liquidateCall {
     receive_a_token: false, // Receive underlying asset
 };
 ```
-
-## Performance Characteristics
-
-### Latency
-- **Liquidation Analysis**: ~200ms per opportunity
-- **Bundle Creation**: ~100ms including price queries
-- **MEV Submission**: ~500ms network round-trip
-
-### Throughput
-- **Concurrent Processing**: 10+ liquidations simultaneously
-- **Bundle Submission**: 50+ bundles per minute capacity
-- **Price Queries**: 100+ asset prices per second
-
-### Accuracy
-- **Profit Estimation**: ±2% accuracy including slippage
-- **Gas Estimation**: ±10% accuracy with safety margins
-- **Success Rate**: 85%+ bundle inclusion rate
 
 ## Configuration
 
@@ -249,19 +232,3 @@ cargo build --release -p profito-rs
 - **overlord-shared**: Common types and AAVE bindings
 - **mev-share**: MEV-Share client for bundle submission
 - **tokio**: Async runtime for concurrent processing
-
-$FinalCollateralReceived = RawCollateralReceived × (1 - slippage)$
-
-$NetProfit = FinalCollateralReceived - DebtRepaid - GasCost$
-
-
-
-### 2. Why would we ever want to ask for a refund ETH amount? (only saw this on beaver, btw)
-TBA
-
-### 3. What exactly is `slippage rate`? Do we even need to account for it?
-$SlippageRate$ is already described above, and it's required because you need to account for the full round trip of the asset. Meaning that if you start with ETH, for example, and use it to liquidate a position for which you might get a different asset as reward, you need to conver that asset back to ETH in order to settle that profit (or loss). You can always keep the reward asset, but you expose yourself to fluctuations on it's price.
-
-### 4. If `CLOSE_FACTOR_HF_THRESHOLD` < HF < 1, then only 50% of the debt can be liquidated. If HF < `CLOSE_FACTOR_HF_THRESHOLD`, then 100% of the debt can be liquidated. Is `CLOSE_FACTOR_HF_THRESHOLD` an attribute of the reserve?
-
-No, `CLOSE_FACTOR_HF_THRESHOLD` is hardcoded into the [LiquidationLogic](https://github.com/aave/aave-v3-core/blob/782f51917056a53a2c228701058a6c3fb233684a/contracts/protocol/libraries/logic/LiquidationLogic.sol#L68C27-L68C63) contract, and it's defined as 0.95e18. If the HF is below 1, but above that, then only 50% can be liquidated. If it's under that value, then you can liquidate 100% of whatever debt you choose.
