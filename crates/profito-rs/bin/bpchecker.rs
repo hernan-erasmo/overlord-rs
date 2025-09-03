@@ -1,3 +1,27 @@
+//! # bpchecker (Best Pair Checker)
+//!
+//! A standalone analysis tool for validating liquidation opportunities and debugging profito-rs calculations.
+//!
+//! ## Purpose
+//!
+//! bpchecker replicates the exact AAVE v3 liquidation logic to:
+//! - **Validate Opportunities**: Manually verify if a user is profitable to liquidate
+//! - **Debug Calculations**: Compare results with profito-rs automated calculations
+//! - **Test Parameters**: Generate exact commands for local testing and production execution
+//! - **Analyze Strategies**: Explore all debt/collateral pair combinations
+//!
+//! ## Usage
+//! 
+//! This is best used through the bur.sh script at the root of this repo
+//! 
+//! ## Output
+//!
+//! 1. **Analysis**: Detailed breakdown of all debt/collateral combinations
+//! 2. **Best Pair**: Optimal liquidation parameters and expected profit
+//! 3. **Test Commands**: Ready-to-use forge commands for local testing
+//! 4. **Production Commands**: Cast commands for actual liquidation execution
+//!
+
 use alloy::{
     primitives::{aliases::U24, utils::format_units, Address, U256},
     providers::{IpcConnect, Provider, ProviderBuilder, RootProvider},
