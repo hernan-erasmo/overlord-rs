@@ -4,7 +4,7 @@ Common utilities, data structures, and smart contract bindings shared across all
 
 ## Overview
 
-overlord-shared provides the foundational infrastructure that enables seamless communication and data sharing between the different components of overlord-rs. It contains shared types, utility functions, contract bindings, and constants used throughout the system.
+Communication and data sharing between the different components of overlord-rs. It contains shared types, utility functions, contract bindings, and constants used throughout the system.
 
 ## Key Components
 

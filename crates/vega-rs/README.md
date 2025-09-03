@@ -4,7 +4,22 @@ The core calculation engine and orchestration center of overlord-rs that maintai
 
 ## Overview
 
-vega-rs is the "brain" of the overlord-rs system. It ingests all AAVE v3 user addresses, maintains an intelligent cache of their health factors, and efficiently recalculates only affected positions when price updates or protocol events occur. This smart caching strategy enables sub-second liquidation detection across 100k+ addresses.
+It ingests the list of all AAVE v3 user addresses who ever borrowed from the protocol, maintains an intelligent cache of their health factors, and efficiently recalculates only affected positions when price updates or protocol events occur. This smart caching strategy enables sub-second liquidation detection across 100k+ addresses.
+
+## Data Flow
+
+### Initialization
+1. **Address Loading**: Read user addresses from data files
+2. **Reserve Discovery**: Query AAVE for all available reserves
+3. **Cache Population**: Build position mappings for all users
+4. **Initial Scan**: Calculate baseline health factors
+
+### Runtime Operations
+1. **Listen for Updates**: Receive price updates from oops-rs and events from whistleblower-rs
+2. **Impact Analysis**: Determine which users are affected
+3. **Targeted Recalculation**: Update only affected health factors
+4. **Liquidation Detection**: Identify users with HF < 1.0
+5. **Event Broadcasting**: Send `UnderwaterUserEvent` to profito-rs
 
 ## Architecture
 
@@ -39,7 +54,7 @@ vega-rs is the "brain" of the overlord-rs system. It ingests all AAVE v3 user ad
 ## Key Features
 
 ### 1. Intelligent User Cache
-The system maintains a sophisticated two-tier cache:
+The system maintains a two-tier cache:
 
 ```rust
 // Cache Structure: Reserve -> PositionType -> [Users]
@@ -82,21 +97,6 @@ let tasks: Vec<_> = address_buckets
     })
     .collect();
 ```
-
-## Data Flow
-
-### Initialization
-1. **Address Loading**: Read user addresses from data files
-2. **Reserve Discovery**: Query AAVE for all available reserves
-3. **Cache Population**: Build position mappings for all users
-4. **Initial Scan**: Calculate baseline health factors
-
-### Runtime Operations
-1. **Listen for Updates**: Receive price updates from oops-rs and events from whistleblower-rs
-2. **Impact Analysis**: Determine which users are affected
-3. **Targeted Recalculation**: Update only affected health factors
-4. **Liquidation Detection**: Identify users with HF < 1.0
-5. **Event Broadcasting**: Send `UnderwaterUserEvent` to profito-rs
 
 ## Optimizations
 
@@ -187,23 +187,6 @@ pub struct UnderwaterUserEvent {
 vega-rs --buckets 64  # Adjust parallel processing buckets
 ```
 
-## Performance Characteristics
-
-### Memory Usage
-- **Baseline**: ~500MB for 100k users
-- **Growth**: Linear with user count
-- **Cache Size**: Configurable per asset type
-
-### Processing Speed
-- **Full Scan**: ~30 seconds for 100k users
-- **Price Update**: <1 second for affected subset
-- **Single User**: <10ms per calculation
-
-### Throughput
-- **Price Updates**: 10+ per second sustained
-- **User Events**: 100+ per second burst capability
-- **Health Factor Calculations**: 1000+ users/second
-
 ## Building
 
 ```bash
@@ -277,7 +260,7 @@ grep "affected.*users" /var/log/overlord-rs/vega-rs.log
 ## Advanced Features
 
 ### 1. Historical Analysis
-- Exports health factor traces for analysis
+- Exports health factor traces for analysis, useful if you think it missed a profitable liquidation
 - Maintains audit trail of all calculations
 - Supports replay for debugging liquidation misses
 
