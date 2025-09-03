@@ -2,6 +2,33 @@
 
 A high-performance AAVE v3 liquidation bot built in Rust, designed to compete with professional MEV bots by leveraging advanced optimization techniques and real-time market monitoring.
 
+## Real-World Performance Examples
+
+**ETH Price Update Liquidation** - 1.5 seconds from mempool price update capture to bundle submission:
+
+```plaintext
+2025-07-15T11:56:19.385381462-03:00  INFO oops_rs: MEMPOOL update sent. trace_id=45dff5ff expected_block=22925317 tx_hash=0x45dff5ffb5071b1dc9d464de107ad1e9e35c5796a6fc3c749c103dace32ce227 slot_info=(7.4, 4.6) price=297854000000 forward_to=0x7d4E742018fb52E48b08BE73d041C18B21de6Fb5
+2025-07-15T11:56:19.385589837-03:00  INFO vega_rs: Vega received price update for trace_id 45dff5ff
+2025-07-15T11:56:19.390692201-03:00  INFO vega_rs::user_reserve_cache: Candidates ready for analysis trace_id=45dff5ff processing_time_ms=5 total_candidates=16418 unique_candidates=13437 buckets=[1120, 1120, 1120, 1120, 1120, 1120, 1120, 1120, 1120, 1119, 1119, 1119] asset_details=(osETH, 203), (WETH, 12430), (cbETH, 177), (wstETH, 2379), (rETH, 363), (weETH, 748), (ETHx, 60), (rsETH, 58)
+2025-07-15T11:56:19.536749007-03:00  INFO vega_rs::fork_provider: Anvil fork started at block 22925316 for bundle 45dff5ff
+2025-07-15T11:56:19.537702042-03:00  INFO vega_rs::fork_provider: Successfuly set storage for bundle 45dff5ff
+2025-07-15T11:56:19.537712475-03:00  INFO vega_rs::fork_provider: Storage in fork for bundle 45dff5ff has been tweaked
+2025-07-15T11:56:19.537805012-03:00  INFO vega_rs::calc_utils: About to start HF calculation tasks for bundle 45dff5ff
+2025-07-15T11:56:20.723874738-03:00  INFO vega_rs: ALERT (from event bus) | 45dff5ff | 0x6872E3B7C26F9Df50f1a6121CD97206ECc5bF7e8 has HF < 1: 997817374504651381 (total collateral 48300093430)
+2025-07-15T11:56:20.72868879-03:00  INFO profito_rs::cache::price: Successfully override 45dff5ff price cache for WETH (new value = 297854000000)
+2025-07-15T11:56:20.7300433-03:00  INFO profito_rs::cache::price: Successfully override 45dff5ff price cache for wstETH (new value = 297854000000)
+2025-07-15T11:56:20.730054929-03:00  INFO profito_rs::cache::price: Successfully override 45dff5ff price cache for cbETH (new value = 297854000000)
+2025-07-15T11:56:20.73006166-03:00  INFO profito_rs::cache::price: Successfully override 45dff5ff price cache for rETH (new value = 297854000000)
+2025-07-15T11:56:20.730066591-03:00  INFO profito_rs::cache::price: Successfully override 45dff5ff price cache for weETH (new value = 297854000000)
+2025-07-15T11:56:20.730071084-03:00  INFO profito_rs::cache::price: Successfully override 45dff5ff price cache for osETH (new value = 297854000000)
+2025-07-15T11:56:20.730075761-03:00  INFO profito_rs::cache::price: Successfully override 45dff5ff price cache for ETHx (new value = 297854000000)
+2025-07-15T11:56:20.73008135-03:00  INFO profito_rs::cache::price: Successfully override 45dff5ff price cache for rsETH (new value = 297854000000)
+2025-07-15T11:56:20.730087165-03:00  INFO profito_rs::cache::price: Dropping prices cached for fdb093ea
+2025-07-15T11:56:20.792032671-03:00  INFO profito_rs: liquidate 0x6872E3B7C26F9Df50f1a6121CD97206ECc5bF7e8 @ 45dff5ff for $13.88107341 (total collateral 48300093430)
+2025-07-15T11:56:21.87602611-03:00  INFO profito_rs: Submitted bundle. Response: SendBundleResponse { bundle_hash: 0xd9a244e2009137d05820e06991dfdb91caec7ddc637f8b6949676c7b08fea9d6 }
+2025-07-15T11:56:26.323814012-03:00  INFO vega_rs: Candidates analysis complete for 45dff5ff | 6938 ms | 13437 candidates processed in 12 buckets | 8 with HF < 1
+```
+
 ## Architecture Overview
 
 overlord-rs is a distributed system composed of five specialized components that work together to identify and execute profitable liquidations on AAVE v3:
@@ -85,6 +112,7 @@ Key variables needed in `.env`:
 - **Latency**: Sub-second health factor recalculations
 - **Throughput**: Processes multiple price updates and events concurrently
 - **Reliability**: Automatic reconnection and error recovery
+
 
 ## Monitoring and Debugging
 
