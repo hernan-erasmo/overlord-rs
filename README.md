@@ -2,6 +2,14 @@
 
 A high-performance AAVE v3 liquidation bot built in Rust, designed to compete with professional MEV bots by leveraging advanced optimization techniques and real-time market monitoring.
 
+<details>
+
+<summary>Disclaimer</summary>
+
+READMEs throughout this repo were written by AI after the whole repo was published. I've read them all, corrected the facts and left some adjectives around for my own personal gloating.
+
+</details>
+
 ## Real-World Performance Examples
 
 **ETH Price Update Liquidation** - 1.5 seconds from mempool price update capture to bundle submission:
