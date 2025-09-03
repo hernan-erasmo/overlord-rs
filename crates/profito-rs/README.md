@@ -221,10 +221,23 @@ cargo build --release -p profito-rs
 ```bash
 # Via startup script (recommended)
 ./scripts/startup-rs.sh
-
-# Direct execution
-./target/release/profito-rs
 ```
+
+## Development Tools
+
+### bpchecker (Best Pair Checker)
+
+A standalone analysis tool for validating liquidation opportunities and debugging calculations. It's best to
+run it through the [bur.sh](../../bur.sh) script at the root of the repo.
+
+**bpchecker** provides:
+- **Validation**: Replicates exact AAVE v3 liquidation logic for verification
+- **Analysis**: Detailed breakdown of all debt/collateral pair combinations  
+- **Testing**: Generates forge commands for local Foxdie contract testing
+- **Production**: Outputs cast commands for actual liquidation execution
+- **Debugging**: Compares calculations with profito-rs automated results
+
+This tool is essential for ensuring profito-rs calculations match AAVE's on-chain behavior.
 
 ## Dependencies
 
