@@ -30,14 +30,15 @@ PROVIDER_URL="/tmp/reth.ipc"
 # Initialize variables with default values
 PROVIDER_URL="/tmp/reth.ipc"
 
-# Process optional flags (4th and 5th arguments)
-for arg in "${@:4}"; do
-    case "$arg" in
-        --use-third-party-provider)
-            PROVIDER_URL="https://eth-mainnet.g.alchemy.com/v2/f48E9HLwDQTbfaoDutz9P07TqfugqApS"
-            ;;
-    esac
-done
+# Check if 4th argument is the flag and 5th argument is the URL
+if [ "$4" = "--use-third-party-provider" ]; then
+    if [ -z "$5" ]; then
+        echo "Error: --use-third-party-provider requires a URL argument"
+        echo "Example: --use-third-party-provider https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY"
+        exit 1
+    fi
+    PROVIDER_URL="$5"
+fi
 
 echo "Building project..."
 if ! cargo build --release --bin bpchecker > /dev/null 2>&1; then
@@ -48,10 +49,14 @@ fi
 # Start anvil with appropriate parameters
 if [ -n "$BLOCK_NUMBER" ]; then
     echo "Starting anvil with block number $BLOCK_NUMBER..."
-    anvil --ipc $ANVIL_IPC --fork-url $PROVIDER_URL --fork-block-number "$BLOCK_NUMBER" > /dev/null 2>&1 &
+    ANVIL_CMD="anvil --ipc $ANVIL_IPC --fork-url $PROVIDER_URL --fork-block-number $BLOCK_NUMBER"
+    echo "Executing: $ANVIL_CMD"
+    $ANVIL_CMD > /dev/null 2>&1 &
 else
     echo "Starting anvil at latest block..."
-    anvil --ipc $ANVIL_IPC --fork-url $PROVIDER_URL > /dev/null 2>&1 &
+    ANVIL_CMD="anvil --ipc $ANVIL_IPC --fork-url $PROVIDER_URL"
+    echo "Executing: $ANVIL_CMD"
+    $ANVIL_CMD > /dev/null 2>&1 &
 fi
 
 ANVIL_PID=$!
