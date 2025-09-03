@@ -1,10 +1,19 @@
 # oops-rs (Optimistic Oracle Price Scout)
 
-The mempool monitoring component of overlord-rs that provides early warning of Chainlink price updates before they are confirmed on-chain.
+The mempool monitoring component of _overlord-rs_ that provides early warning of Chainlink price updates before they are confirmed on-chain.
 
 ## Overview
 
-oops-rs is the "early warning system" that gives overlord-rs its competitive edge. By monitoring pending transactions in both the public mempool and MEV-Share, it can detect price updates 12-15 seconds before they're included in blocks, allowing the system to precompute liquidations and be first to execute.
+By monitoring pending transactions in both the public mempool and MEV-Share (because of [this](https://governance.aave.com/t/temp-check-aave-chainlink-svr-v1-integration/20378)), it can detect price updates before they're included in blocks, allowing the system to precompute liquidations and be first to execute.
+
+## Data Flow
+
+1. **Transaction Detection**: Monitor mempool/MEV-Share for pending txs
+2. **Address Filtering**: Check if sender is tracked Chainlink forwarder
+3. **Function Filtering**: Verify transaction calls `forward()` with `transmit()` data
+4. **Price Extraction**: Decode nested calldata to extract new price
+5. **Deduplication**: Check LRU cache to avoid reprocessing
+6. **Forwarding**: Send `PriceUpdateBundle` to vega-rs via ZMQ
 
 ## Architecture
 
@@ -41,12 +50,12 @@ oops-rs is the "early warning system" that gives overlord-rs its competitive edg
 - **MEV-Share**: Private mempool access for competitive transactions
 
 ### 2. Smart Filtering
-- Tracks specific forwarder addresses that submit Chainlink updates
+- Tracks specific forwarder addresses that submit Chainlink updates to prevent spoofing.
 - Filters by `forward()` function calls containing `transmit()` data
-- Maintains LRU cache to avoid reprocessing duplicate transactions
+- Maintains LRU cache to avoid reprocessing duplicate transactions and re-triggering downstream calculations.
 
 ### 3. Price Extraction
-The system decodes complex nested calldata:
+The system decodes tx calldata:
 ```rust
 // Extracts from: forward(address to, bytes calldata data)
 // Where data contains: transmit(bytes32[3] reportContext, bytes report, ...)
@@ -87,16 +96,6 @@ const SECONDS_BEFORE_RECONNECTION: u64 = 2;
 ### 3. Memory Efficiency
 - Bounded caches prevent memory leaks
 - Efficient bytecode scanning using sliding windows
-- Minimal allocation in hot paths
-
-## Data Flow
-
-1. **Transaction Detection**: Monitor mempool/MEV-Share for pending txs
-2. **Address Filtering**: Check if sender is tracked Chainlink forwarder
-3. **Function Filtering**: Verify transaction calls `forward()` with `transmit()` data
-4. **Price Extraction**: Decode nested calldata to extract new price
-5. **Deduplication**: Check LRU cache to avoid reprocessing
-6. **Forwarding**: Send `PriceUpdateBundle` to vega-rs via ZMQ
 
 ## Message Format
 
@@ -122,7 +121,7 @@ pub struct PriceUpdateBundle {
 - Comprehensive logging for debugging missed updates
 - Graceful degradation when one data source fails
 
-### Common Issues
+### Things to look out for
 1. **Missing Updates**: Usually due to untracked forwarder addresses
 2. **Parsing Errors**: May indicate changes in Chainlink submission format
 3. **Connection Issues**: Automatic reconnection with exponential backoff
@@ -148,23 +147,6 @@ cargo build --release -p oops-rs
 
 # Direct execution
 ./target/release/oops-rs
-```
-
-## Debugging
-
-### Check Address Tracking
-```bash
-# Verify forwarder addresses are current
-grep "Forward" /var/log/overlord-rs/oops-rs.log
-
-# Check for parsing errors
-grep "parsing" /var/log/overlord-rs/oops-rs.log
-```
-
-### Monitor Price Updates
-```bash
-# Follow detected updates in real-time
-tail -f /var/log/overlord-rs/oops-rs.log | grep "price update"
 ```
 
 ## Dependencies
